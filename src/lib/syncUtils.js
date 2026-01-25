@@ -67,6 +67,27 @@ export function localToDbItem(localItem, userId) {
     colorHex = getColorHexFromName(colorName);
   }
   
+  // 处理 purchaseDate：确保格式正确
+  let purchaseDate = localItem.purchaseDate;
+  if (purchaseDate) {
+    // 如果是 YYYY-MM 格式，转换为 YYYY-MM-01（添加日期部分）
+    if (purchaseDate.match(/^\d{4}-\d{2}$/)) {
+      purchaseDate = purchaseDate + '-01';
+    }
+    // 尝试转换为 ISO 格式，如果失败则保持原样
+    try {
+      const date = new Date(purchaseDate);
+      if (!isNaN(date.getTime())) {
+        // 如果是有效的日期，转换为 ISO 格式
+        purchaseDate = date.toISOString().split('T')[0]; // YYYY-MM-DD 格式
+      }
+    } catch {
+      // 如果转换失败，保持原样
+    }
+  } else {
+    purchaseDate = null;
+  }
+  
   return {
     id: localItem.id,
     user_id: userId,
@@ -74,7 +95,7 @@ export function localToDbItem(localItem, userId) {
     main_category: localItem.mainCategory || '上衣',
     sub_category: localItem.subCategory || 'T恤',
     season: season,
-    purchase_date: localItem.purchaseDate || null,
+    purchase_date: purchaseDate,
     price: price,
     frequency: localItem.frequency || '偶尔',
     color: localItem.color || '黑色',
