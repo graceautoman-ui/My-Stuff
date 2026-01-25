@@ -370,12 +370,66 @@ function App() {
         // 如果是对象，尝试提取 clothesItems 和 daughterClothesItems
         clothesData = parsedData.clothesItems || parsedData.clothes || [];
         daughterData = parsedData.daughterClothesItems || parsedData.daughter || [];
+      } else if (parsedData.localStorage) {
+        // 如果是导出格式（包含 localStorage 对象，值可能是 JSON 字符串）
+        const localStorage = parsedData.localStorage;
+        
+        // 处理 grace_stuff_clothes_v1（可能是字符串或数组）
+        if (localStorage.grace_stuff_clothes_v1) {
+          if (typeof localStorage.grace_stuff_clothes_v1 === 'string') {
+            // 如果是字符串，需要再次解析
+            try {
+              clothesData = JSON.parse(localStorage.grace_stuff_clothes_v1);
+            } catch (e) {
+              console.error("解析 clothes 数据失败:", e);
+              clothesData = [];
+            }
+          } else if (Array.isArray(localStorage.grace_stuff_clothes_v1)) {
+            clothesData = localStorage.grace_stuff_clothes_v1;
+          }
+        }
+        
+        // 处理 grace_stuff_daughter_clothes_v1（可能是字符串或数组）
+        if (localStorage.grace_stuff_daughter_clothes_v1) {
+          if (typeof localStorage.grace_stuff_daughter_clothes_v1 === 'string') {
+            // 如果是字符串，需要再次解析
+            try {
+              daughterData = JSON.parse(localStorage.grace_stuff_daughter_clothes_v1);
+            } catch (e) {
+              console.error("解析 daughter 数据失败:", e);
+              daughterData = [];
+            }
+          } else if (Array.isArray(localStorage.grace_stuff_daughter_clothes_v1)) {
+            daughterData = localStorage.grace_stuff_daughter_clothes_v1;
+          }
+        }
       } else if (parsedData.grace_stuff_clothes_v1 || parsedData[STORAGE_KEY]) {
-        // 如果是 localStorage 格式
-        clothesData = parsedData.grace_stuff_clothes_v1 || parsedData[STORAGE_KEY] || [];
-        daughterData = parsedData.grace_stuff_daughter_clothes_v1 || parsedData[STORAGE_KEY_DAUGHTER] || [];
+        // 如果是直接的 localStorage 格式（键值对，值可能是字符串或数组）
+        const clothesRaw = parsedData.grace_stuff_clothes_v1 || parsedData[STORAGE_KEY];
+        const daughterRaw = parsedData.grace_stuff_daughter_clothes_v1 || parsedData[STORAGE_KEY_DAUGHTER];
+        
+        // 处理可能是字符串的情况
+        if (typeof clothesRaw === 'string') {
+          try {
+            clothesData = JSON.parse(clothesRaw);
+          } catch (e) {
+            clothesData = [];
+          }
+        } else if (Array.isArray(clothesRaw)) {
+          clothesData = clothesRaw;
+        }
+        
+        if (typeof daughterRaw === 'string') {
+          try {
+            daughterData = JSON.parse(daughterRaw);
+          } catch (e) {
+            daughterData = [];
+          }
+        } else if (Array.isArray(daughterRaw)) {
+          daughterData = daughterRaw;
+        }
       } else {
-        throw new Error("无法识别数据格式，请确保是有效的 JSON 格式");
+        throw new Error("无法识别数据格式，请确保是有效的 JSON 格式。支持格式：数组、对象（clothesItems/daughterClothesItems）、localStorage 导出格式");
       }
 
       // 验证数据项格式
