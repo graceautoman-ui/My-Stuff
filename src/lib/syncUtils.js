@@ -224,11 +224,24 @@ export function dbToLocalItem(dbItem) {
     }
   }
   
-  // 处理 mainCategory：只有在确实为空时才使用默认值
+  // 处理 mainCategory：保留数据库中的原始值，只有在确实为空时才使用默认值
+  // 注意：不要轻易使用默认值，因为这可能导致数据丢失
   let mainCategory = dbItem.main_category;
-  if (!mainCategory || mainCategory === null || mainCategory === undefined || mainCategory === '') {
-    // 只有在确实为空时才使用默认值，但这种情况应该很少见
+  // 只有在确实为空（null、undefined、空字符串）时才使用默认值
+  // 但这种情况应该很少见，因为正常数据应该有 main_category 值
+  if (mainCategory === null || mainCategory === undefined || mainCategory === '') {
+    // 只有在确实为空时才使用默认值
     mainCategory = '上衣';
+    // 记录警告，帮助调试
+    console.warn(`⚠️ [dbToLocalItem] 数据库中的 main_category 为空，使用默认值'上衣'。`, {
+      itemId: dbItem.id,
+      itemName: dbItem.name,
+      main_category_raw: dbItem.main_category,
+      main_category_type: typeof dbItem.main_category,
+      main_category_is_null: dbItem.main_category === null,
+      main_category_is_undefined: dbItem.main_category === undefined,
+      main_category_is_empty: dbItem.main_category === '',
+    });
   }
   
   return {
@@ -317,13 +330,28 @@ export function mergeItems(localItems, remoteItems) {
           }
         }
         
+        // 处理 mainCategory：如果远程数据是默认值'上衣'，但本地数据有有效的值，保留本地的
+        let mergedMainCategory = remoteItem.mainCategory;
+        if ((!mergedMainCategory || mergedMainCategory === null || mergedMainCategory === undefined || mergedMainCategory === '' || mergedMainCategory === '上衣')
+            && localItem.mainCategory 
+            && localItem.mainCategory !== null 
+            && localItem.mainCategory !== undefined 
+            && localItem.mainCategory !== '' 
+            && localItem.mainCategory !== '上衣') {
+          // 远程数据是空的或默认值'上衣'，但本地数据有有效的值，保留本地的
+          mergedMainCategory = localItem.mainCategory;
+        } else if (!mergedMainCategory || mergedMainCategory === null || mergedMainCategory === undefined || mergedMainCategory === '') {
+          // 如果远程数据完全没有 mainCategory，使用本地的
+          mergedMainCategory = localItem.mainCategory || null;
+        }
+        
         const mergedItem = {
           ...remoteItem,
           // 保留本地数据中存在的字段，如果远程数据中这些字段为空或不存在
           purchaseDate: remoteItem.purchaseDate || localItem.purchaseDate || null,
           colorHex: mergedColorHex,
           subCategory: mergedSubCategory,
-          mainCategory: remoteItem.mainCategory || localItem.mainCategory || null,
+          mainCategory: mergedMainCategory,
           color: remoteItem.color || localItem.color || '黑色',
           price: remoteItem.price !== null && remoteItem.price !== undefined ? remoteItem.price : (localItem.price !== null && localItem.price !== undefined ? localItem.price : null),
           season: remoteItem.season || localItem.season || '四季',
@@ -436,6 +464,58 @@ export async function downloadItemsFromSupabase(supabase, userId, tableName) {
     if (error) {
       console.error(`Error downloading from ${tableName}:`, error);
       return { success: false, error, items: [] };
+    }
+    
+    // 🔍 调试：检查数据库中的原始 main_category 值
+    if (data && data.length > 0) {
+      console.log(`📊 [调试] 从 ${tableName} 下载了 ${data.length} 条数据`);
+      const mainCategoryStats = {};
+      const emptyMainCategory = [];
+      
+      data.forEach((item, index) => {
+        const mainCategory = item.main_category;
+        const status = mainCategory === null || mainCategory === undefined || mainCategory === '' 
+          ? '空值' 
+          : mainCategory;
+        
+        if (!mainCategoryStats[status]) {
+          mainCategoryStats[status] = 0;
+        }
+        mainCategoryStats[status]++;
+        
+        // 记录 main_category 为空的条目
+        if (mainCategory === null || mainCategory === undefined || mainCategory === '') {
+          emptyMainCategory.push({
+            id: item.id,
+            name: item.name,
+            main_category: mainCategory,
+            index: index
+          });
+        }
+      });
+      
+      console.log(`📊 [调试] main_category 统计:`, mainCategoryStats);
+      
+      if (emptyMainCategory.length > 0) {
+        console.warn(`⚠️ [调试] 发现 ${emptyMainCategory.length} 条 main_category 为空的记录:`, emptyMainCategory);
+        // 显示前5条作为示例
+        console.warn(`⚠️ [调试] 前5条空值示例:`, emptyMainCategory.slice(0, 5));
+      } else {
+        console.log(`✅ [调试] 所有记录的 main_category 都有值`);
+      }
+      
+      // 显示第一条数据的完整信息作为示例
+      if (data[0]) {
+        console.log(`📋 [调试] 第一条数据示例 (原始数据库格式):`, {
+          id: data[0].id,
+          name: data[0].name,
+          main_category: data[0].main_category,
+          main_category_type: typeof data[0].main_category,
+          main_category_is_null: data[0].main_category === null,
+          main_category_is_undefined: data[0].main_category === undefined,
+          main_category_is_empty: data[0].main_category === '',
+        });
+      }
     }
     
     const localItems = (data || []).map(dbToLocalItem);
