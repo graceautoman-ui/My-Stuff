@@ -152,18 +152,37 @@ function App() {
       console.log("🔄 开始初始化同步...");
 
       // 1. 从云端下载数据
+      console.log("📥 从云端下载数据...");
       const [clothesResult, daughterResult] = await Promise.all([
         downloadItemsFromSupabase(supabase, userId, "clothes_items"),
         downloadItemsFromSupabase(supabase, userId, "daughter_clothes_items"),
       ]);
 
+      // 检查下载结果
+      if (!clothesResult.success) {
+        console.error("❌ 下载衣物数据失败:", clothesResult.error);
+        if (clothesResult.error?.message?.includes("relation") || clothesResult.error?.message?.includes("does not exist")) {
+          throw new Error("数据库表不存在！请在 Supabase Dashboard 中执行 supabase_setup.sql 脚本创建表。");
+        }
+      }
+      if (!daughterResult.success) {
+        console.error("❌ 下载女儿衣物数据失败:", daughterResult.error);
+        if (daughterResult.error?.message?.includes("relation") || daughterResult.error?.message?.includes("does not exist")) {
+          throw new Error("数据库表不存在！请在 Supabase Dashboard 中执行 supabase_setup.sql 脚本创建表。");
+        }
+      }
+
+      console.log(`📥 下载完成: 衣物 ${clothesResult.items?.length || 0} 条, 女儿衣物 ${daughterResult.items?.length || 0} 条`);
+
       // 2. 读取本地数据
       const localClothes = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
       const localDaughter = JSON.parse(localStorage.getItem(STORAGE_KEY_DAUGHTER) || "[]");
+      console.log(`💾 本地数据: 衣物 ${localClothes.length} 条, 女儿衣物 ${localDaughter.length} 条`);
 
       // 3. 合并数据（处理冲突）
       const mergedClothes = mergeItems(localClothes, clothesResult.items || []);
       const mergedDaughter = mergeItems(localDaughter, daughterResult.items || []);
+      console.log(`🔄 合并后: 衣物 ${mergedClothes.length} 条, 女儿衣物 ${mergedDaughter.length} 条`);
 
       // 4. 更新状态和本地存储
       setClothesItems(mergedClothes);
@@ -172,10 +191,26 @@ function App() {
       localStorage.setItem(STORAGE_KEY_DAUGHTER, JSON.stringify(mergedDaughter));
 
       // 5. 上传合并后的数据到云端（确保云端是最新的）
-      await Promise.all([
+      console.log("📤 上传数据到云端...");
+      const [uploadClothesResult, uploadDaughterResult] = await Promise.all([
         uploadItemsToSupabase(supabase, mergedClothes, userId, "clothes_items"),
         uploadItemsToSupabase(supabase, mergedDaughter, userId, "daughter_clothes_items"),
       ]);
+
+      if (!uploadClothesResult.success) {
+        console.error("❌ 上传衣物数据失败:", uploadClothesResult.error);
+        if (uploadClothesResult.error?.message?.includes("relation") || uploadClothesResult.error?.message?.includes("does not exist")) {
+          throw new Error("数据库表不存在！请在 Supabase Dashboard 中执行 supabase_setup.sql 脚本创建表。");
+        }
+      }
+      if (!uploadDaughterResult.success) {
+        console.error("❌ 上传女儿衣物数据失败:", uploadDaughterResult.error);
+        if (uploadDaughterResult.error?.message?.includes("relation") || uploadDaughterResult.error?.message?.includes("does not exist")) {
+          throw new Error("数据库表不存在！请在 Supabase Dashboard 中执行 supabase_setup.sql 脚本创建表。");
+        }
+      }
+
+      console.log(`📤 上传完成: 衣物 ${uploadClothesResult.count || 0} 条, 女儿衣物 ${uploadDaughterResult.count || 0} 条`);
 
       // 6. 订阅实时更新
       subscribeToRealtimeUpdates(userId);
@@ -473,25 +508,47 @@ function App() {
       }
 
       // 上传到云端
+      let uploadErrors = [];
       if (newClothes.length > 0) {
-        await uploadItemsToSupabase(supabase, newClothes, session.user.id, "clothes_items");
+        console.log(`📤 上传 ${newClothes.length} 条衣物数据到云端...`);
+        const result = await uploadItemsToSupabase(supabase, newClothes, session.user.id, "clothes_items");
+        if (!result.success) {
+          console.error("衣物数据上传失败:", result.error);
+          uploadErrors.push(`衣物数据上传失败: ${result.error?.message || "未知错误"}`);
+        } else {
+          console.log(`✅ 衣物数据上传成功: ${result.count} 条`);
+        }
       }
       if (newDaughter.length > 0) {
-        await uploadItemsToSupabase(supabase, newDaughter, session.user.id, "daughter_clothes_items");
+        console.log(`📤 上传 ${newDaughter.length} 条女儿衣物数据到云端...`);
+        const result = await uploadItemsToSupabase(supabase, newDaughter, session.user.id, "daughter_clothes_items");
+        if (!result.success) {
+          console.error("女儿衣物数据上传失败:", result.error);
+          uploadErrors.push(`女儿衣物数据上传失败: ${result.error?.message || "未知错误"}`);
+        } else {
+          console.log(`✅ 女儿衣物数据上传成功: ${result.count} 条`);
+        }
       }
 
       // 成功提示
       const totalImported = newClothes.length + newDaughter.length;
       const skipped = (validClothes.length - newClothes.length) + (validDaughter.length - newDaughter.length);
       
-      let message = `成功导入 ${totalImported} 条数据！`;
+      let message = `成功导入 ${totalImported} 条数据到本地！`;
       if (skipped > 0) {
         message += `（跳过 ${skipped} 条重复数据）`;
       }
       
-      alert(message);
-      setShowImportModal(false);
-      setImportData("");
+      if (uploadErrors.length > 0) {
+        message += `\n\n⚠️ 警告：云端上传失败\n${uploadErrors.join("\n")}\n\n请检查：\n1. Supabase 数据库表是否已创建\n2. 浏览器控制台是否有详细错误信息`;
+        alert(message);
+        setImportError(uploadErrors.join("; "));
+      } else {
+        message += `\n\n✅ 数据已同步到云端，其他设备登录后会自动同步！`;
+        alert(message);
+        setShowImportModal(false);
+        setImportData("");
+      }
     } catch (error) {
       console.error("导入错误:", error);
       setImportError(error.message || "导入失败，请检查数据格式");
@@ -1474,6 +1531,53 @@ function App() {
             }}
           >
             导入数据
+          </button>
+          <button
+            onClick={async () => {
+              if (!session?.user) {
+                alert("请先登录");
+                return;
+              }
+              if (confirm("确定要将本地数据上传到云端吗？这会将所有本地数据同步到 Supabase。")) {
+                setIsSyncing(true);
+                setSyncError("");
+                try {
+                  console.log("📤 手动上传本地数据到云端...");
+                  const result1 = await uploadItemsToSupabase(supabase, clothesItems, session.user.id, "clothes_items");
+                  const result2 = await uploadItemsToSupabase(supabase, daughterClothesItems, session.user.id, "daughter_clothes_items");
+                  
+                  if (result1.success && result2.success) {
+                    alert(`✅ 上传成功！\n衣物: ${result1.count} 条\n女儿衣物: ${result2.count} 条\n\n其他设备登录后会自动同步这些数据。`);
+                    setSyncError("");
+                  } else {
+                    const errors = [];
+                    if (!result1.success) errors.push(`衣物: ${result1.error?.message || "上传失败"}`);
+                    if (!result2.success) errors.push(`女儿衣物: ${result2.error?.message || "上传失败"}`);
+                    alert(`❌ 上传失败：\n${errors.join("\n")}\n\n请检查浏览器控制台的详细错误信息。`);
+                    setSyncError(errors.join("; "));
+                  }
+                } catch (error) {
+                  console.error("上传失败:", error);
+                  alert(`❌ 上传失败: ${error.message}\n\n请检查：\n1. Supabase 表是否已创建\n2. 浏览器控制台的错误信息`);
+                  setSyncError(error.message);
+                } finally {
+                  setIsSyncing(false);
+                }
+              }
+            }}
+            disabled={isSyncing}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: "1px solid #2196F3",
+              background: isSyncing ? "#ccc" : "#fff",
+              cursor: isSyncing ? "not-allowed" : "pointer",
+              fontSize: "clamp(12px, 3vw, 14px)",
+              color: "#2196F3",
+              whiteSpace: "nowrap"
+            }}
+          >
+            {isSyncing ? "同步中..." : "上传到云端"}
           </button>
           <button
             onClick={signOut}
