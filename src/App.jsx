@@ -48,8 +48,10 @@ function App() {
       }
       setSession(data?.session);
       if (data?.session) {
-        // 登录后初始化同步
-        initializeSync(data.session.user.id);
+        // 延迟初始化同步，避免阻塞初始渲染
+        setTimeout(() => {
+          initializeSync(data.session.user.id);
+        }, 100);
       }
     });
 
@@ -57,8 +59,10 @@ function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
       if (newSession && !isInitialSyncRef.current) {
-        // 登录后初始化同步
-        initializeSync(newSession.user.id);
+        // 延迟初始化同步，避免阻塞初始渲染
+        setTimeout(() => {
+          initializeSync(newSession.user.id);
+        }, 100);
       } else if (!newSession) {
         // 登出时清理
         cleanupSync();
@@ -212,43 +216,55 @@ function App() {
       const mergedDaughter = mergeItems(localDaughter, remoteDaughter);
       console.log(`🔄 合并后: 衣物 ${mergedClothes.length} 条, 女儿衣物 ${mergedDaughter.length} 条`);
 
-      // 5. 更新状态和本地存储
+      // 5. 更新状态和本地存储（先更新UI，让用户看到数据）
       setClothesItems(mergedClothes);
       setDaughterClothesItems(mergedDaughter);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedClothes));
       localStorage.setItem(STORAGE_KEY_DAUGHTER, JSON.stringify(mergedDaughter));
 
-      // 6. 上传合并后的数据到云端（确保云端是最新的）
-      console.log("📤 上传数据到云端...");
-      const [uploadClothesResult, uploadDaughterResult] = await Promise.all([
-        uploadItemsToSupabase(supabase, mergedClothes, userId, "clothes_items"),
-        uploadItemsToSupabase(supabase, mergedDaughter, userId, "daughter_clothes_items"),
-      ]);
+      // 6. 上传合并后的数据到云端（延迟执行，避免阻塞UI）
+      // 使用 setTimeout 让浏览器有机会渲染页面
+      setTimeout(async () => {
+        try {
+          console.log("📤 上传数据到云端...");
+          const [uploadClothesResult, uploadDaughterResult] = await Promise.all([
+            uploadItemsToSupabase(supabase, mergedClothes, userId, "clothes_items"),
+            uploadItemsToSupabase(supabase, mergedDaughter, userId, "daughter_clothes_items"),
+          ]);
 
-      if (!uploadClothesResult.success) {
-        console.error("❌ 上传衣物数据失败:", uploadClothesResult.error);
-        if (uploadClothesResult.error?.message?.includes("relation") || uploadClothesResult.error?.message?.includes("does not exist")) {
-          throw new Error("数据库表不存在！请在 Supabase Dashboard 中执行 supabase_setup.sql 脚本创建表。");
+          if (!uploadClothesResult.success) {
+            console.error("❌ 上传衣物数据失败:", uploadClothesResult.error);
+            if (uploadClothesResult.error?.message?.includes("relation") || uploadClothesResult.error?.message?.includes("does not exist")) {
+              setSyncError("数据库表不存在！请在 Supabase Dashboard 中执行 supabase_setup.sql 脚本创建表。");
+              return;
+            }
+          }
+          if (!uploadDaughterResult.success) {
+            console.error("❌ 上传女儿衣物数据失败:", uploadDaughterResult.error);
+            if (uploadDaughterResult.error?.message?.includes("relation") || uploadDaughterResult.error?.message?.includes("does not exist")) {
+              setSyncError("数据库表不存在！请在 Supabase Dashboard 中执行 supabase_setup.sql 脚本创建表。");
+              return;
+            }
+          }
+
+          console.log(`📤 上传完成: 衣物 ${uploadClothesResult.count || 0} 条, 女儿衣物 ${uploadDaughterResult.count || 0} 条`);
+
+          // 7. 订阅实时更新
+          subscribeToRealtimeUpdates(userId);
+
+          console.log("✅ 同步初始化完成");
+          setSyncError("");
+        } catch (error) {
+          console.error("❌ 上传数据失败:", error);
+          setSyncError("上传失败: " + (error.message || "未知错误"));
         }
-      }
-      if (!uploadDaughterResult.success) {
-        console.error("❌ 上传女儿衣物数据失败:", uploadDaughterResult.error);
-        if (uploadDaughterResult.error?.message?.includes("relation") || uploadDaughterResult.error?.message?.includes("does not exist")) {
-          throw new Error("数据库表不存在！请在 Supabase Dashboard 中执行 supabase_setup.sql 脚本创建表。");
-        }
-      }
-
-      console.log(`📤 上传完成: 衣物 ${uploadClothesResult.count || 0} 条, 女儿衣物 ${uploadDaughterResult.count || 0} 条`);
-
-      // 7. 订阅实时更新
-      subscribeToRealtimeUpdates(userId);
-
-      console.log("✅ 同步初始化完成");
-      setSyncError("");
+      }, 0);
+      
+      // 提前完成同步状态，让用户知道数据已加载（上传在后台进行）
+      setIsSyncing(false);
     } catch (error) {
       console.error("❌ 同步初始化失败:", error);
       setSyncError("同步失败: " + (error.message || "未知错误"));
-    } finally {
       setIsSyncing(false);
     }
   }
@@ -1302,13 +1318,45 @@ function App() {
     }
   }
 
-  // Section 2f-1: Add Clothes Item Handler
+  // Section 2f-1: Check Duplicate Item
+  // Checks if an item with the same purchaseDate, price, and color already exists.
+  function checkDuplicateItem(purchaseDate, price, color, itemsList) {
+    const normalizedPurchaseDate = purchaseDate || null;
+    const normalizedPrice = price !== null && price !== undefined ? parseFloat(price) : null;
+    const normalizedColor = color || null;
+    
+    return itemsList.find(item => {
+      const itemPurchaseDate = item.purchaseDate || null;
+      const itemPrice = item.price !== null && item.price !== undefined ? parseFloat(item.price) : null;
+      const itemColor = item.color || null;
+      
+      return itemPurchaseDate === normalizedPurchaseDate &&
+             itemPrice === normalizedPrice &&
+             itemColor === normalizedColor;
+    });
+  }
+
+  // Section 2f-2: Add Clothes Item Handler
   // Adds a new clothing item with a unique ID, main category, subcategory, name, season, purchase date, price, frequency, color, and creation date to the state.
   // After adding, resets the form fields.
 
   function addClothesItem() {
     const name = cName.trim();
     if (!name) return;
+
+    const purchaseDate = cPurchaseDate || null;
+    const price = cPrice.trim() ? parseFloat(cPrice) || null : null;
+    const color = cColor;
+
+    // 检查重复
+    const duplicateItem = checkDuplicateItem(purchaseDate, price, color, clothesItems);
+    if (duplicateItem) {
+      const confirmMessage = `存在类似的物品：【${duplicateItem.name}】，请确认是否新增？`;
+      if (!window.confirm(confirmMessage)) {
+        // 用户点击"否"，取消新增
+        return;
+      }
+    }
 
     const selectedColor = colors.find((c) => c.name === cColor);
     const item = {
@@ -1317,10 +1365,10 @@ function App() {
       mainCategory: cMainCategory,
       subCategory: cSubCategory,
       season: mapSeason(cSeason),
-      purchaseDate: cPurchaseDate || null,
-      price: cPrice.trim() ? parseFloat(cPrice) || null : null,
+      purchaseDate: purchaseDate,
+      price: price,
       frequency: mapFrequency(cFrequency),
-      color: cColor,
+      color: color,
       colorHex: selectedColor?.hex || "#CCCCCC",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1454,7 +1502,7 @@ function App() {
     setCPurchaseDate(item.purchaseDate || "");
     setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
     setCFrequency(mapFrequency(item.frequency || "偶尔"));
-    setCColor("黑色"); // Reset color so user can choose different color
+    setCColor(item.color || "黑色"); // 保留原物品的颜色
     // Scroll to form area (optional, but helpful UX)
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -1487,13 +1535,27 @@ function App() {
     setEndReasonItemId(null);
   }
 
-  // Section 2f-2: Add Daughter Clothes Item Handler
+  // Section 2f-3: Add Daughter Clothes Item Handler
   // Adds a new clothing item for daughter with a unique ID, main category, subcategory, name, season, purchase date, price, frequency, color, and creation date to the state.
   // After adding, resets the form fields.
 
   function addDaughterClothesItem() {
     const name = cName.trim();
     if (!name) return;
+
+    const purchaseDate = cPurchaseDate || null;
+    const price = cPrice.trim() ? parseFloat(cPrice) || null : null;
+    const color = cColor;
+
+    // 检查重复
+    const duplicateItem = checkDuplicateItem(purchaseDate, price, color, daughterClothesItems);
+    if (duplicateItem) {
+      const confirmMessage = `存在类似的物品：【${duplicateItem.name}】，请确认是否新增？`;
+      if (!window.confirm(confirmMessage)) {
+        // 用户点击"否"，取消新增
+        return;
+      }
+    }
 
     const selectedColor = colors.find((c) => c.name === cColor);
     const item = {
@@ -1502,10 +1564,10 @@ function App() {
       mainCategory: cMainCategory,
       subCategory: cSubCategory,
       season: mapSeason(cSeason),
-      purchaseDate: cPurchaseDate || null,
-      price: cPrice.trim() ? parseFloat(cPrice) || null : null,
+      purchaseDate: purchaseDate,
+      price: price,
       frequency: mapFrequency(cFrequency),
-      color: cColor,
+      color: color,
       colorHex: selectedColor?.hex || "#CCCCCC",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1652,7 +1714,7 @@ function App() {
     setCPurchaseDate(item.purchaseDate || "");
     setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
     setCFrequency(mapFrequency(item.frequency || "偶尔"));
-    setCColor("黑色"); // Reset color so user can choose different color
+    setCColor(item.color || "黑色"); // 保留原物品的颜色
     // Scroll to form area (optional, but helpful UX)
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
