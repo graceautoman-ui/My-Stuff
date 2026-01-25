@@ -88,12 +88,46 @@ export function localToDbItem(localItem, userId) {
     purchaseDate = null;
   }
   
+  // 处理 mainCategory：只有在确实为空时才使用默认值
+  let mainCategory = localItem.mainCategory;
+  if (!mainCategory || mainCategory === null || mainCategory === undefined || mainCategory === '') {
+    // 只有在确实为空时才使用默认值，但这种情况应该很少见
+    mainCategory = '上衣';
+  }
+  
+  // 处理 subCategory：只有在确实为空时才使用默认值
+  let subCategory = localItem.subCategory;
+  if (!subCategory || subCategory === null || subCategory === undefined || subCategory === '') {
+    // 根据 mainCategory 设置默认值
+    if (mainCategory === '上衣') {
+      subCategory = 'T恤';
+    } else if (mainCategory === '下装') {
+      subCategory = '长裤';
+    } else if (mainCategory === '连衣裙') {
+      subCategory = '长袖连衣裙';
+    } else if (mainCategory === '内衣裤') {
+      subCategory = '内衣';
+    } else if (mainCategory === '运动服') {
+      subCategory = '运动上衣';
+    } else if (mainCategory === '套装') {
+      subCategory = '西装套装';
+    } else if (mainCategory === '鞋类') {
+      subCategory = '运动鞋';
+    } else if (mainCategory === '包包类') {
+      subCategory = '手提包';
+    } else if (mainCategory === '帽子类') {
+      subCategory = '棒球帽';
+    } else {
+      subCategory = '其他';
+    }
+  }
+  
   return {
     id: localItem.id,
     user_id: userId,
     name: localItem.name || '',
-    main_category: localItem.mainCategory || '上衣',
-    sub_category: localItem.subCategory || 'T恤',
+    main_category: mainCategory,
+    sub_category: subCategory,
     season: season,
     purchase_date: purchaseDate,
     price: price,
@@ -190,10 +224,17 @@ export function dbToLocalItem(dbItem) {
     }
   }
   
+  // 处理 mainCategory：只有在确实为空时才使用默认值
+  let mainCategory = dbItem.main_category;
+  if (!mainCategory || mainCategory === null || mainCategory === undefined || mainCategory === '') {
+    // 只有在确实为空时才使用默认值，但这种情况应该很少见
+    mainCategory = '上衣';
+  }
+  
   return {
     id: dbItem.id,
     name: dbItem.name,
-    mainCategory: dbItem.main_category || '上衣',
+    mainCategory: mainCategory,
     subCategory: subCategory,
     // 数据库中的season是数组，转换为字符串（单选）
     season: Array.isArray(dbItem.season) && dbItem.season.length > 0 
