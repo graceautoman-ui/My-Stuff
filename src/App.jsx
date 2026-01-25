@@ -1932,6 +1932,44 @@ function App() {
             </span>
           )}
           <button
+            onClick={() => {
+              // 导出本地数据为 JSON
+              const exportData = {
+                clothesItems: clothesItems,
+                daughterClothesItems: daughterClothesItems,
+                localStorage: {
+                  [STORAGE_KEY]: JSON.stringify(clothesItems),
+                  [STORAGE_KEY_DAUGHTER]: JSON.stringify(daughterClothesItems)
+                }
+              };
+              
+              const jsonStr = JSON.stringify(exportData, null, 2);
+              const blob = new Blob([jsonStr], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `stuff-vault-export-${new Date().toISOString().split('T')[0]}.json`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+              
+              alert(`✅ 导出成功！\n衣物: ${clothesItems.length} 条\n女儿衣物: ${daughterClothesItems.length} 条\n\n文件已下载到您的下载文件夹。`);
+            }}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: "1px solid #2196F3",
+              background: "#fff",
+              cursor: "pointer",
+              fontSize: "clamp(12px, 3vw, 14px)",
+              color: "#2196F3",
+              whiteSpace: "nowrap"
+            }}
+          >
+            导出数据
+          </button>
+          <button
             onClick={() => setShowImportModal(true)}
             style={{
               padding: "8px 14px",

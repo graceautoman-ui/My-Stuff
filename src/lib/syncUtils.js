@@ -146,16 +146,60 @@ export function dbToLocalItem(dbItem) {
     colorHex = getColorHexFromName(colorName);
   }
   
+  // 处理 purchaseDate：如果是 YYYY-MM-DD 格式，转换为 YYYY-MM 格式（本地存储格式）
+  let purchaseDate = dbItem.purchase_date;
+  if (purchaseDate) {
+    // 如果是 YYYY-MM-DD 格式，提取年月部分
+    if (purchaseDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      purchaseDate = purchaseDate.substring(0, 7); // 提取 YYYY-MM
+    }
+    // 如果是其他格式，尝试解析并转换
+    else if (!purchaseDate.match(/^\d{4}-\d{2}$/)) {
+      try {
+        const date = new Date(purchaseDate);
+        if (!isNaN(date.getTime())) {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          purchaseDate = `${year}-${month}`;
+        }
+      } catch {
+        // 如果解析失败，保持原样
+      }
+    }
+  } else {
+    purchaseDate = null;
+  }
+  
+  // 处理 subCategory：确保有默认值
+  let subCategory = dbItem.sub_category;
+  if (!subCategory || subCategory === null || subCategory === undefined || subCategory === '') {
+    // 如果 sub_category 为空，根据 main_category 设置默认值
+    const mainCategory = dbItem.main_category || '上衣';
+    if (mainCategory === '上衣') {
+      subCategory = 'T恤';
+    } else if (mainCategory === '下装') {
+      subCategory = '长裤';
+    } else if (mainCategory === '外套') {
+      subCategory = '大衣';
+    } else if (mainCategory === '鞋') {
+      subCategory = '运动鞋';
+    } else if (mainCategory === '包') {
+      subCategory = '双肩包';
+    } else {
+      subCategory = '其他';
+    }
+  }
+  
   return {
     id: dbItem.id,
     name: dbItem.name,
-    mainCategory: dbItem.main_category,
-    subCategory: dbItem.sub_category,
+    mainCategory: dbItem.main_category || '上衣',
+    subCategory: subCategory,
     // 数据库中的season是数组，转换为字符串（单选）
     season: Array.isArray(dbItem.season) && dbItem.season.length > 0 
       ? dbItem.season[0] 
       : (typeof dbItem.season === 'string' ? dbItem.season : '四季'),
-    purchaseDate: dbItem.purchase_date || null,
+    purchaseDate: purchaseDate,
     price: dbItem.price !== null ? parseFloat(dbItem.price) : null,
     frequency: dbItem.frequency || '偶尔',
     color: dbItem.color || '黑色',
@@ -209,12 +253,35 @@ export function mergeItems(localItems, remoteItems) {
           mergedColorHex = getColorHexFromName(remoteItem.color || localItem.color || '黑色');
         }
         
+        // 处理 subCategory：如果远程数据为空，保留本地的
+        let mergedSubCategory = remoteItem.subCategory;
+        if (!mergedSubCategory || mergedSubCategory === null || mergedSubCategory === undefined || mergedSubCategory === '') {
+          mergedSubCategory = localItem.subCategory || null;
+          // 如果本地也没有，根据 mainCategory 设置默认值
+          if (!mergedSubCategory) {
+            const mainCategory = remoteItem.mainCategory || localItem.mainCategory || '上衣';
+            if (mainCategory === '上衣') {
+              mergedSubCategory = 'T恤';
+            } else if (mainCategory === '下装') {
+              mergedSubCategory = '长裤';
+            } else if (mainCategory === '外套') {
+              mergedSubCategory = '大衣';
+            } else if (mainCategory === '鞋') {
+              mergedSubCategory = '运动鞋';
+            } else if (mainCategory === '包') {
+              mergedSubCategory = '双肩包';
+            } else {
+              mergedSubCategory = '其他';
+            }
+          }
+        }
+        
         const mergedItem = {
           ...remoteItem,
           // 保留本地数据中存在的字段，如果远程数据中这些字段为空或不存在
           purchaseDate: remoteItem.purchaseDate || localItem.purchaseDate || null,
           colorHex: mergedColorHex,
-          subCategory: remoteItem.subCategory || localItem.subCategory || null,
+          subCategory: mergedSubCategory,
           mainCategory: remoteItem.mainCategory || localItem.mainCategory || null,
           color: remoteItem.color || localItem.color || '黑色',
           price: remoteItem.price !== null && remoteItem.price !== undefined ? remoteItem.price : (localItem.price !== null && localItem.price !== undefined ? localItem.price : null),
