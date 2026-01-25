@@ -33,6 +33,12 @@ function App() {
   const [syncError, setSyncError] = useState("");
   const syncChannelRef = useRef(null);
   const isInitialSyncRef = useRef(false);
+  
+  // 数据导入相关状态
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importData, setImportData] = useState("");
+  const [importError, setImportError] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
 
   useEffect(() => {
     // 1) Read session once on mount
@@ -329,6 +335,138 @@ function App() {
       console.error(`同步${type === "clothes" ? "衣物" : "女儿衣物"}失败:`, error);
       // 不阻塞用户操作，静默失败
     }
+  }
+
+  /**
+   * 导入 JSON 数据
+   */
+  async function handleImportData() {
+    if (!session?.user) {
+      setImportError("请先登录");
+      return;
+    }
+
+    setIsImporting(true);
+    setImportError("");
+
+    try {
+      // 解析 JSON 数据
+      let parsedData;
+      try {
+        parsedData = JSON.parse(importData);
+      } catch (e) {
+        throw new Error("JSON 格式错误，请检查数据格式");
+      }
+
+      // 验证数据格式
+      let clothesData = [];
+      let daughterData = [];
+
+      // 处理不同的数据格式
+      if (Array.isArray(parsedData)) {
+        // 如果是数组，假设是衣物数据
+        clothesData = parsedData;
+      } else if (parsedData.clothesItems || parsedData.clothes) {
+        // 如果是对象，尝试提取 clothesItems 和 daughterClothesItems
+        clothesData = parsedData.clothesItems || parsedData.clothes || [];
+        daughterData = parsedData.daughterClothesItems || parsedData.daughter || [];
+      } else if (parsedData.grace_stuff_clothes_v1 || parsedData[STORAGE_KEY]) {
+        // 如果是 localStorage 格式
+        clothesData = parsedData.grace_stuff_clothes_v1 || parsedData[STORAGE_KEY] || [];
+        daughterData = parsedData.grace_stuff_daughter_clothes_v1 || parsedData[STORAGE_KEY_DAUGHTER] || [];
+      } else {
+        throw new Error("无法识别数据格式，请确保是有效的 JSON 格式");
+      }
+
+      // 验证数据项格式
+      const validateItem = (item) => {
+        return item && typeof item === 'object' && item.name && item.id;
+      };
+
+      const validClothes = Array.isArray(clothesData) ? clothesData.filter(validateItem) : [];
+      const validDaughter = Array.isArray(daughterData) ? daughterData.filter(validateItem) : [];
+
+      if (validClothes.length === 0 && validDaughter.length === 0) {
+        throw new Error("未找到有效的数据，请检查数据格式");
+      }
+
+      // 为每个项目添加 updatedAt（如果不存在）
+      const processedClothes = validClothes.map(item => ({
+        ...item,
+        updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+        createdAt: item.createdAt || new Date().toISOString(),
+      }));
+
+      const processedDaughter = validDaughter.map(item => ({
+        ...item,
+        updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+        createdAt: item.createdAt || new Date().toISOString(),
+      }));
+
+      // 合并到现有数据（避免重复）
+      const existingClothesIds = new Set(clothesItems.map(item => item.id));
+      const existingDaughterIds = new Set(daughterClothesItems.map(item => item.id));
+
+      const newClothes = processedClothes.filter(item => !existingClothesIds.has(item.id));
+      const newDaughter = processedDaughter.filter(item => !existingDaughterIds.has(item.id));
+
+      // 更新状态
+      if (newClothes.length > 0) {
+        setClothesItems(prev => [...newClothes, ...prev]);
+      }
+      if (newDaughter.length > 0) {
+        setDaughterClothesItems(prev => [...newDaughter, ...prev]);
+      }
+
+      // 上传到云端
+      if (newClothes.length > 0) {
+        await uploadItemsToSupabase(supabase, newClothes, session.user.id, "clothes_items");
+      }
+      if (newDaughter.length > 0) {
+        await uploadItemsToSupabase(supabase, newDaughter, session.user.id, "daughter_clothes_items");
+      }
+
+      // 成功提示
+      const totalImported = newClothes.length + newDaughter.length;
+      const skipped = (validClothes.length - newClothes.length) + (validDaughter.length - newDaughter.length);
+      
+      let message = `成功导入 ${totalImported} 条数据！`;
+      if (skipped > 0) {
+        message += `（跳过 ${skipped} 条重复数据）`;
+      }
+      
+      alert(message);
+      setShowImportModal(false);
+      setImportData("");
+    } catch (error) {
+      console.error("导入错误:", error);
+      setImportError(error.message || "导入失败，请检查数据格式");
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  /**
+   * 处理文件上传
+   */
+  function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target.result;
+        setImportData(content);
+        setImportError("");
+      } catch (error) {
+        setImportError("文件读取失败");
+      }
+    };
+    reader.onerror = () => {
+      setImportError("文件读取失败");
+    };
+    reader.readAsText(file);
   }
 
   // Section 2a-1: Category State
@@ -1268,6 +1406,21 @@ function App() {
               {session.user.email || session.user.user_metadata?.user_name || "已登录"}
             </span>
           )}
+          <button
+            onClick={() => setShowImportModal(true)}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: "1px solid #4CAF50",
+              background: "#fff",
+              cursor: "pointer",
+              fontSize: "clamp(12px, 3vw, 14px)",
+              color: "#4CAF50",
+              whiteSpace: "nowrap"
+            }}
+          >
+            导入数据
+          </button>
           <button
             onClick={signOut}
             style={{
@@ -2621,6 +2774,159 @@ function App() {
             >
               取消
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 数据导入模态框 */}
+      {showImportModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "16px",
+          }}
+          onClick={() => {
+            if (!isImporting) {
+              setShowImportModal(false);
+              setImportData("");
+              setImportError("");
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: 24,
+              borderRadius: 12,
+              minWidth: 300,
+              maxWidth: 600,
+              width: "100%",
+              maxHeight: "80vh",
+              overflow: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 16 }}>导入历史数据</h3>
+            <p style={{ color: "#666", fontSize: 14, marginBottom: 16 }}>
+              请粘贴之前下载的 JSON 数据，或上传 JSON 文件
+            </p>
+
+            {/* 文件上传 */}
+            <div style={{ marginBottom: 16 }}>
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={handleFileUpload}
+                disabled={isImporting}
+                style={{
+                  fontSize: 14,
+                  padding: "8px",
+                  width: "100%",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* 文本输入 */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+                或直接粘贴 JSON 数据：
+              </label>
+              <textarea
+                value={importData}
+                onChange={(e) => {
+                  setImportData(e.target.value);
+                  setImportError("");
+                }}
+                disabled={isImporting}
+                placeholder='例如: [{"id":"...","name":"...","mainCategory":"上衣",...}] 或 {"clothesItems":[...],"daughterClothesItems":[...]}'
+                style={{
+                  width: "100%",
+                  minHeight: "200px",
+                  padding: "12px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  fontSize: 13,
+                  fontFamily: "monospace",
+                  boxSizing: "border-box",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+
+            {/* 错误提示 */}
+            {importError && (
+              <div
+                style={{
+                  padding: "12px",
+                  borderRadius: 6,
+                  backgroundColor: "#fee",
+                  color: "#c33",
+                  fontSize: 13,
+                  marginBottom: 16,
+                }}
+              >
+                {importError}
+              </div>
+            )}
+
+            {/* 按钮 */}
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportData("");
+                  setImportError("");
+                }}
+                disabled={isImporting}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  background: "#fff",
+                  cursor: isImporting ? "not-allowed" : "pointer",
+                  fontSize: 14,
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleImportData}
+                disabled={isImporting || !importData.trim()}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: 8,
+                  border: "1px solid #4CAF50",
+                  background: isImporting || !importData.trim() ? "#ccc" : "#4CAF50",
+                  color: "white",
+                  cursor: isImporting || !importData.trim() ? "not-allowed" : "pointer",
+                  fontSize: 14,
+                  fontWeight: 500,
+                }}
+              >
+                {isImporting ? "导入中..." : "导入数据"}
+              </button>
+            </div>
+
+            {/* 提示信息 */}
+            <div style={{ marginTop: 16, padding: "12px", backgroundColor: "#f5f5f5", borderRadius: 6, fontSize: 12, color: "#666" }}>
+              <strong>提示：</strong>
+              <ul style={{ margin: "8px 0 0 0", paddingLeft: 20 }}>
+                <li>支持直接粘贴 JSON 数组格式的数据</li>
+                <li>支持包含 clothesItems 和 daughterClothesItems 的对象格式</li>
+                <li>支持 localStorage 导出的格式</li>
+                <li>重复的数据（相同 ID）会被自动跳过</li>
+              </ul>
+            </div>
           </div>
         </div>
       )}
