@@ -60,6 +60,13 @@ export function localToDbItem(localItem, userId) {
     endDate = null;
   }
   
+  // 如果 colorHex 不存在，根据 color 字段推断
+  let colorHex = localItem.colorHex;
+  if (!colorHex || colorHex === null || colorHex === undefined) {
+    const colorName = localItem.color || '黑色';
+    colorHex = getColorHexFromName(colorName);
+  }
+  
   return {
     id: localItem.id,
     user_id: userId,
@@ -71,7 +78,7 @@ export function localToDbItem(localItem, userId) {
     price: price,
     frequency: localItem.frequency || '偶尔',
     color: localItem.color || '黑色',
-    color_hex: localItem.colorHex || '#000000',
+    color_hex: colorHex,
     created_at: createdAt,
     updated_at: new Date().toISOString(),
     end_reason: localItem.endReason || null,
@@ -80,9 +87,44 @@ export function localToDbItem(localItem, userId) {
 }
 
 /**
+ * 根据颜色名称获取对应的 hex 值
+ */
+function getColorHexFromName(colorName) {
+  const colorMap = {
+    "黑色": "#000000",
+    "白色": "#FFFFFF",
+    "灰色": "#808080",
+    "红色": "#FF0000",
+    "蓝色": "#0000FF",
+    "浅蓝色": "#ADD8E6",
+    "绿色": "#008000",
+    "黄色": "#FFFF00",
+    "粉色": "#FFC0CB",
+    "紫色": "#800080",
+    "浅紫色": "#DDA0DD",
+    "棕色": "#A52A2A",
+    "米色": "#F5F5DC",
+    "卡其色": "#C3B091",
+    "驼色": "#D2B48C",
+    "军绿色": "#4B5320",
+    "藏青色": "#1E3A5F",
+    "其他": "#CCCCCC",
+  };
+  return colorMap[colorName] || '#000000';
+}
+
+/**
  * 将数据库格式转换为本地格式
  */
 export function dbToLocalItem(dbItem) {
+  // 如果 color_hex 不存在或为空，尝试根据 color 字段推断
+  let colorHex = dbItem.color_hex;
+  if (!colorHex || colorHex === '#000000' || colorHex === null || colorHex === undefined) {
+    // 如果 color_hex 不存在或是黑色，尝试根据 color 字段推断
+    const colorName = dbItem.color || '黑色';
+    colorHex = getColorHexFromName(colorName);
+  }
+  
   return {
     id: dbItem.id,
     name: dbItem.name,
@@ -96,7 +138,7 @@ export function dbToLocalItem(dbItem) {
     price: dbItem.price !== null ? parseFloat(dbItem.price) : null,
     frequency: dbItem.frequency || '偶尔',
     color: dbItem.color || '黑色',
-    colorHex: dbItem.color_hex || '#000000',
+    colorHex: colorHex,
     createdAt: dbItem.created_at || new Date().toISOString(),
     updatedAt: dbItem.updated_at || new Date().toISOString(),
     endReason: dbItem.end_reason || null,
@@ -133,11 +175,24 @@ export function mergeItems(localItems, remoteItems) {
         merged.set(localItem.id, localItem);
       } else {
         // 远程更新，但需要保留本地数据中存在的字段（如果远程数据缺少这些字段）
+        // 对于 colorHex，如果远程数据是黑色（可能是默认值），但本地数据有有效的颜色，保留本地的
+        let mergedColorHex = remoteItem.colorHex;
+        if ((!mergedColorHex || mergedColorHex === '#000000' || mergedColorHex === null || mergedColorHex === undefined) 
+            && localItem.colorHex 
+            && localItem.colorHex !== '#000000' 
+            && localItem.colorHex !== '#CCCCCC') {
+          // 远程数据是黑色（可能是默认值），但本地数据有有效的颜色，保留本地的
+          mergedColorHex = localItem.colorHex;
+        } else if (!mergedColorHex || mergedColorHex === null || mergedColorHex === undefined) {
+          // 如果远程数据完全没有 colorHex，尝试根据 color 字段推断
+          mergedColorHex = getColorHexFromName(remoteItem.color || localItem.color || '黑色');
+        }
+        
         const mergedItem = {
           ...remoteItem,
           // 保留本地数据中存在的字段，如果远程数据中这些字段为空或不存在
           purchaseDate: remoteItem.purchaseDate || localItem.purchaseDate || null,
-          colorHex: remoteItem.colorHex || localItem.colorHex || '#000000',
+          colorHex: mergedColorHex,
           subCategory: remoteItem.subCategory || localItem.subCategory || null,
           mainCategory: remoteItem.mainCategory || localItem.mainCategory || null,
           color: remoteItem.color || localItem.color || '黑色',

@@ -665,23 +665,53 @@ function App() {
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      // 映射历史数据的频率值和季节值
-      return parsed.map(item => ({
-        ...item,
-        frequency: item.frequency ? (() => {
-          const frequencyMap = {
-            "从未": "从未",
-            "很少": "偶尔",
-            "偶尔": "偶尔",
-            "每月几次": "有时",
-            "每周一次": "有时",
-            "每周多次": "经常",
-            "每天": "每天",
+      // 映射历史数据的频率值和季节值，并修复 colorHex
+      return parsed.map(item => {
+        // 如果 colorHex 不存在，或者 colorHex 是黑色但 color 不是黑色（说明数据有问题），根据 color 字段推断
+        let colorHex = item.colorHex;
+        const colorName = item.color || '黑色';
+        if (!colorHex || colorHex === null || colorHex === undefined || colorHex === '' 
+            || (colorHex === '#000000' && colorName !== '黑色')) {
+          const colorMap = {
+            "黑色": "#000000",
+            "白色": "#FFFFFF",
+            "灰色": "#808080",
+            "红色": "#FF0000",
+            "蓝色": "#0000FF",
+            "浅蓝色": "#ADD8E6",
+            "绿色": "#008000",
+            "黄色": "#FFFF00",
+            "粉色": "#FFC0CB",
+            "紫色": "#800080",
+            "浅紫色": "#DDA0DD",
+            "棕色": "#A52A2A",
+            "米色": "#F5F5DC",
+            "卡其色": "#C3B091",
+            "驼色": "#D2B48C",
+            "军绿色": "#4B5320",
+            "藏青色": "#1E3A5F",
+            "其他": "#CCCCCC",
           };
-          return frequencyMap[item.frequency] || "偶尔";
-        })() : "偶尔",
-        season: mapSeason(item.season)
-      }));
+          colorHex = colorMap[colorName] || '#000000';
+        }
+        return {
+          ...item,
+          frequency: item.frequency ? (() => {
+            const frequencyMap = {
+              "从未": "从未",
+              "很少": "偶尔",
+              "偶尔": "偶尔",
+              "每月几次": "有时",
+              "每周一次": "有时",
+              "每周多次": "经常",
+              "每天": "每天",
+            };
+            return frequencyMap[item.frequency] || "偶尔";
+          })() : "偶尔",
+          season: mapSeason(item.season),
+          colorHex: colorHex
+        };
+      });
     } catch {
       return [];
     }
@@ -697,23 +727,53 @@ function App() {
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      // 映射历史数据的频率值和季节值
-      return parsed.map(item => ({
-        ...item,
-        frequency: item.frequency ? (() => {
-          const frequencyMap = {
-            "从未": "从未",
-            "很少": "偶尔",
-            "偶尔": "偶尔",
-            "每月几次": "有时",
-            "每周一次": "有时",
-            "每周多次": "经常",
-            "每天": "每天",
+      // 映射历史数据的频率值和季节值，并修复 colorHex
+      return parsed.map(item => {
+        // 如果 colorHex 不存在，或者 colorHex 是黑色但 color 不是黑色（说明数据有问题），根据 color 字段推断
+        let colorHex = item.colorHex;
+        const colorName = item.color || '黑色';
+        if (!colorHex || colorHex === null || colorHex === undefined || colorHex === '' 
+            || (colorHex === '#000000' && colorName !== '黑色')) {
+          const colorMap = {
+            "黑色": "#000000",
+            "白色": "#FFFFFF",
+            "灰色": "#808080",
+            "红色": "#FF0000",
+            "蓝色": "#0000FF",
+            "浅蓝色": "#ADD8E6",
+            "绿色": "#008000",
+            "黄色": "#FFFF00",
+            "粉色": "#FFC0CB",
+            "紫色": "#800080",
+            "浅紫色": "#DDA0DD",
+            "棕色": "#A52A2A",
+            "米色": "#F5F5DC",
+            "卡其色": "#C3B091",
+            "驼色": "#D2B48C",
+            "军绿色": "#4B5320",
+            "藏青色": "#1E3A5F",
+            "其他": "#CCCCCC",
           };
-          return frequencyMap[item.frequency] || "偶尔";
-        })() : "偶尔",
-        season: mapSeason(item.season)
-      }));
+          colorHex = colorMap[colorName] || '#000000';
+        }
+        return {
+          ...item,
+          frequency: item.frequency ? (() => {
+            const frequencyMap = {
+              "从未": "从未",
+              "很少": "偶尔",
+              "偶尔": "偶尔",
+              "每月几次": "有时",
+              "每周一次": "有时",
+              "每周多次": "经常",
+              "每天": "每天",
+            };
+            return frequencyMap[item.frequency] || "偶尔";
+          })() : "偶尔",
+          season: mapSeason(item.season),
+          colorHex: colorHex
+        };
+      });
     } catch {
       return [];
     }
@@ -1316,7 +1376,7 @@ function App() {
             price: cPrice.trim() ? parseFloat(cPrice) || null : null,
             frequency: mapFrequency(cFrequency),
             color: cColor,
-            colorHex: selectedColor?.hex || "#CCCCCC",
+            colorHex: selectedColor?.hex || item.colorHex || "#CCCCCC",
             updatedAt: new Date().toISOString(),
           };
           return updatedItem;
@@ -1501,7 +1561,7 @@ function App() {
             price: cPrice.trim() ? parseFloat(cPrice) || null : null,
             frequency: mapFrequency(cFrequency),
             color: cColor,
-            colorHex: selectedColor?.hex || "#CCCCCC",
+            colorHex: selectedColor?.hex || item.colorHex || "#CCCCCC",
             updatedAt: new Date().toISOString(),
           };
           return updatedItem;
