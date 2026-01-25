@@ -2,15 +2,7 @@
 // The file imports React hooks (`useEffect`, `useMemo`, `useState`) from "react" for state and side-effect management.
 // It also defines a constant `STORAGE_KEY` which will be used as the key for localStorage operations.
 
-import { useEffect, useMemo, useState, useRef } from "react";
-import { supabase } from "./lib/supabaseClient";
-import {
-  uploadItemsToSupabase,
-  downloadItemsFromSupabase,
-  deleteItemFromSupabase,
-  mergeItems,
-  dbToLocalItem,
-} from "./lib/syncUtils";
+import { useEffect, useMemo, useState } from "react";
 
 const STORAGE_KEY = "grace_stuff_clothes_v1";
 const STORAGE_KEY_DAUGHTER = "grace_stuff_daughter_clothes_v1";
@@ -19,320 +11,9 @@ const STORAGE_KEY_DAUGHTER = "grace_stuff_daughter_clothes_v1";
 // The `App` function defines the main component for the app.
 
 function App() {
-  // Section 2a: Auth State (Supabase)
-  // Authentication state management using Supabase
-  const [session, setSession] = useState(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [authError, setAuthError] = useState("");
-  const [loading, setLoading] = useState(false);
-  
-  // 同步相关状态
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncError, setSyncError] = useState("");
-  const syncChannelRef = useRef(null);
-  const isInitialSyncRef = useRef(false);
-
-  useEffect(() => {
-    // 1) Read session once on mount
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (error) {
-        console.error("Session read error:", error);
-      }
-      setSession(data?.session);
-      if (data?.session) {
-        // 登录后初始化同步
-        initializeSync(data.session.user.id);
-      }
-    });
-
-    // 2) Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      if (newSession && !isInitialSyncRef.current) {
-        // 登录后初始化同步
-        initializeSync(newSession.user.id);
-      } else if (!newSession) {
-        // 登出时清理
-        cleanupSync();
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-      cleanupSync();
-    };
-  }, []);
-
-  async function signInWithEmail() {
-    setAuthError("");
-    setLoading(true);
-    
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password: password,
-    });
-    
-    setLoading(false);
-    
-    if (error) {
-      console.error("Login error:", error);
-      setAuthError(error.message);
-    } else {
-      console.log("Login successful:", data.user?.email);
-      setEmail("");
-      setPassword("");
-    }
-  }
-
-  async function signUpWithEmail() {
-    setAuthError("");
-    setLoading(true);
-    
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password: password,
-    });
-    
-    setLoading(false);
-    
-    if (error) {
-      console.error("Sign up error:", error);
-      setAuthError(error.message);
-    } else {
-      console.log("Sign up successful:", data.user?.email);
-      setAuthError("注册成功！请检查邮箱验证链接（如果需要）。");
-      // Switch to sign in mode after successful sign up
-      setTimeout(() => {
-        setIsSignUp(false);
-        setEmail("");
-        setPassword("");
-        setAuthError("");
-      }, 2000);
-    }
-  }
-
-  async function handleAuthSubmit(e) {
-    e.preventDefault();
-    if (isSignUp) {
-      await signUpWithEmail();
-    } else {
-      await signInWithEmail();
-    }
-  }
-
-  async function signOut() {
-    cleanupSync();
-    await supabase.auth.signOut();
-  }
-
-  // ========== 数据同步函数 ==========
-
-  /**
-   * 初始化同步：登录后执行
-   * 1. 从云端下载数据
-   * 2. 与本地数据合并
-   * 3. 上传本地未同步的数据
-   * 4. 订阅实时更新
-   */
-  async function initializeSync(userId) {
-    if (isInitialSyncRef.current) return;
-    isInitialSyncRef.current = true;
-    setIsSyncing(true);
-    setSyncError("");
-
-    try {
-      console.log("🔄 开始初始化同步...");
-
-      // 1. 从云端下载数据
-      const [clothesResult, daughterResult] = await Promise.all([
-        downloadItemsFromSupabase(supabase, userId, "clothes_items"),
-        downloadItemsFromSupabase(supabase, userId, "daughter_clothes_items"),
-      ]);
-
-      // 2. 读取本地数据
-      const localClothes = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      const localDaughter = JSON.parse(localStorage.getItem(STORAGE_KEY_DAUGHTER) || "[]");
-
-      // 3. 合并数据（处理冲突）
-      const mergedClothes = mergeItems(localClothes, clothesResult.items || []);
-      const mergedDaughter = mergeItems(localDaughter, daughterResult.items || []);
-
-      // 4. 更新状态和本地存储
-      setClothesItems(mergedClothes);
-      setDaughterClothesItems(mergedDaughter);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedClothes));
-      localStorage.setItem(STORAGE_KEY_DAUGHTER, JSON.stringify(mergedDaughter));
-
-      // 5. 上传合并后的数据到云端（确保云端是最新的）
-      await Promise.all([
-        uploadItemsToSupabase(supabase, mergedClothes, userId, "clothes_items"),
-        uploadItemsToSupabase(supabase, mergedDaughter, userId, "daughter_clothes_items"),
-      ]);
-
-      // 6. 订阅实时更新
-      subscribeToRealtimeUpdates(userId);
-
-      console.log("✅ 同步初始化完成");
-      setSyncError("");
-    } catch (error) {
-      console.error("❌ 同步初始化失败:", error);
-      setSyncError("同步失败: " + (error.message || "未知错误"));
-    } finally {
-      setIsSyncing(false);
-    }
-  }
-
-  /**
-   * 订阅 Supabase Realtime 更新
-   */
-  function subscribeToRealtimeUpdates(userId) {
-    // 清理旧的订阅
-    if (syncChannelRef.current) {
-      supabase.removeChannel(syncChannelRef.current);
-    }
-
-    // 创建新的订阅
-    const channel = supabase
-      .channel(`user-${userId}-sync`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "clothes_items",
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          console.log("📥 收到衣物数据更新:", payload.eventType, payload.new);
-          handleRealtimeUpdate(payload, "clothes");
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "daughter_clothes_items",
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          console.log("📥 收到女儿衣物数据更新:", payload.eventType, payload.new);
-          handleRealtimeUpdate(payload, "daughter");
-        }
-      )
-      .subscribe((status) => {
-        console.log("📡 Realtime 订阅状态:", status);
-      });
-
-    syncChannelRef.current = channel;
-  }
-
-  /**
-   * 处理 Realtime 更新
-   */
-  function handleRealtimeUpdate(payload, type) {
-    const { eventType, new: newItem, old: oldItem } = payload;
-
-    if (eventType === "INSERT" || eventType === "UPDATE") {
-      const localItem = dbToLocalItem(newItem);
-      if (type === "clothes") {
-        setClothesItems((prev) => {
-          const existing = prev.find((item) => item.id === localItem.id);
-          if (existing) {
-            // 更新现有项目（比较 updatedAt）
-            const existingUpdated = new Date(existing.updatedAt || existing.createdAt || 0);
-            const newUpdated = new Date(localItem.updatedAt || localItem.createdAt || 0);
-            if (newUpdated > existingUpdated) {
-              // 远程更新，更新本地
-              const updated = prev.map((item) =>
-                item.id === localItem.id ? { ...localItem, updatedAt: localItem.updatedAt } : item
-              );
-              // 同时更新 localStorage
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-              return updated;
-            }
-            return prev;
-          } else {
-            // 添加新项目
-            const updated = [localItem, ...prev];
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-            return updated;
-          }
-        });
-      } else {
-        setDaughterClothesItems((prev) => {
-          const existing = prev.find((item) => item.id === localItem.id);
-          if (existing) {
-            const existingUpdated = new Date(existing.updatedAt || existing.createdAt || 0);
-            const newUpdated = new Date(localItem.updatedAt || localItem.createdAt || 0);
-            if (newUpdated > existingUpdated) {
-              const updated = prev.map((item) =>
-                item.id === localItem.id ? { ...localItem, updatedAt: localItem.updatedAt } : item
-              );
-              localStorage.setItem(STORAGE_KEY_DAUGHTER, JSON.stringify(updated));
-              return updated;
-            }
-            return prev;
-          } else {
-            const updated = [localItem, ...prev];
-            localStorage.setItem(STORAGE_KEY_DAUGHTER, JSON.stringify(updated));
-            return updated;
-          }
-        });
-      }
-    } else if (eventType === "DELETE") {
-      // 删除项目
-      if (type === "clothes") {
-        setClothesItems((prev) => {
-          const updated = prev.filter((item) => item.id !== oldItem.id);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-          return updated;
-        });
-      } else {
-        setDaughterClothesItems((prev) => {
-          const updated = prev.filter((item) => item.id !== oldItem.id);
-          localStorage.setItem(STORAGE_KEY_DAUGHTER, JSON.stringify(updated));
-          return updated;
-        });
-      }
-    }
-  }
-
-  /**
-   * 清理同步订阅
-   */
-  function cleanupSync() {
-    if (syncChannelRef.current) {
-      supabase.removeChannel(syncChannelRef.current);
-      syncChannelRef.current = null;
-    }
-    isInitialSyncRef.current = false;
-  }
-
-  /**
-   * 上传单个项目到云端（在数据操作后调用）
-   */
-  async function syncItemToCloud(item, type, operation = "upsert") {
-    if (!session?.user) return;
-
-    const tableName = type === "clothes" ? "clothes_items" : "daughter_clothes_items";
-
-    try {
-      if (operation === "delete") {
-        await deleteItemFromSupabase(supabase, item.id, tableName);
-      } else {
-        await uploadItemsToSupabase(supabase, [item], session.user.id, tableName);
-      }
-    } catch (error) {
-      console.error(`同步${type === "clothes" ? "衣物" : "女儿衣物"}失败:`, error);
-      // 不阻塞用户操作，静默失败
-    }
-  }
-
-  // Section 2a-1: Category State
+  // Section 2a: Category State
   // `category` state determines whether the user is viewing clothes, beauty products, or daughter's clothes.
+
   const [category, setCategory] = useState("clothes"); // clothes | beauty | daughterClothes
 
   // Section 2b: Clothes Items State (Local Storage Persistence)
@@ -764,14 +445,9 @@ function App() {
       color: cColor,
       colorHex: selectedColor?.hex || "#CCCCCC",
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     };
 
     setClothesItems((prev) => [item, ...prev]);
-    
-    // 同步到云端
-    syncItemToCloud(item, "clothes", "upsert");
-    
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤");
@@ -786,13 +462,7 @@ function App() {
   // Removes a clothing item by its unique ID.
 
   function removeClothesItem(id) {
-    const item = clothesItems.find((x) => x.id === id);
     setClothesItems((prev) => prev.filter((x) => x.id !== id));
-    
-    // 同步删除到云端
-    if (item) {
-      syncItemToCloud(item, "clothes", "delete");
-    }
   }
 
   // Section 2g-1: Update Clothes Item Handler
@@ -803,34 +473,24 @@ function App() {
     if (!name) return;
 
     const selectedColor = colors.find((c) => c.name === cColor);
-    let updatedItem = null;
     setClothesItems((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          updatedItem = {
-            ...item,
-            name,
-            mainCategory: cMainCategory,
-            subCategory: cSubCategory,
-            season: cSeason,
-            purchaseDate: cPurchaseDate || null,
-            price: cPrice.trim() ? parseFloat(cPrice) || null : null,
-            frequency: cFrequency,
-            color: cColor,
-            colorHex: selectedColor?.hex || "#CCCCCC",
-            updatedAt: new Date().toISOString(),
-          };
-          return updatedItem;
-        }
-        return item;
-      })
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              name,
+              mainCategory: cMainCategory,
+              subCategory: cSubCategory,
+              season: cSeason,
+              purchaseDate: cPurchaseDate || null,
+              price: cPrice.trim() ? parseFloat(cPrice) || null : null,
+              frequency: cFrequency,
+              color: cColor,
+              colorHex: selectedColor?.hex || "#CCCCCC",
+            }
+          : item
+      )
     );
-    
-    // 同步更新到云端
-    if (updatedItem) {
-      syncItemToCloud(updatedItem, "clothes", "upsert");
-    }
-    
     setEditingItemId(null);
     setCName("");
     setCMainCategory("上衣");
@@ -893,27 +553,17 @@ function App() {
   // Sets the end reason and date for a clothing item.
 
   function setEndReason(id, reason) {
-    let updatedItem = null;
     setClothesItems((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          updatedItem = {
-            ...item,
-            endReason: reason,
-            endDate: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          return updatedItem;
-        }
-        return item;
-      })
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              endReason: reason,
+              endDate: new Date().toISOString(),
+            }
+          : item
+      )
     );
-    
-    // 同步更新到云端
-    if (updatedItem) {
-      syncItemToCloud(updatedItem, "clothes", "upsert");
-    }
-    
     setEndReasonItemId(null);
   }
 
@@ -938,14 +588,9 @@ function App() {
       color: cColor,
       colorHex: selectedColor?.hex || "#CCCCCC",
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     };
 
     setDaughterClothesItems((prev) => [item, ...prev]);
-    
-    // 同步到云端
-    syncItemToCloud(item, "daughter", "upsert");
-    
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤");
@@ -960,13 +605,7 @@ function App() {
   // Removes a daughter's clothing item by its unique ID.
 
   function removeDaughterClothesItem(id) {
-    const item = daughterClothesItems.find((x) => x.id === id);
     setDaughterClothesItems((prev) => prev.filter((x) => x.id !== id));
-    
-    // 同步删除到云端
-    if (item) {
-      syncItemToCloud(item, "daughter", "delete");
-    }
   }
 
   // Section 2g-5: Update Daughter Clothes Item Handler
@@ -977,34 +616,24 @@ function App() {
     if (!name) return;
 
     const selectedColor = colors.find((c) => c.name === cColor);
-    let updatedItem = null;
     setDaughterClothesItems((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          updatedItem = {
-            ...item,
-            name,
-            mainCategory: cMainCategory,
-            subCategory: cSubCategory,
-            season: cSeason,
-            purchaseDate: cPurchaseDate || null,
-            price: cPrice.trim() ? parseFloat(cPrice) || null : null,
-            frequency: cFrequency,
-            color: cColor,
-            colorHex: selectedColor?.hex || "#CCCCCC",
-            updatedAt: new Date().toISOString(),
-          };
-          return updatedItem;
-        }
-        return item;
-      })
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              name,
+              mainCategory: cMainCategory,
+              subCategory: cSubCategory,
+              season: cSeason,
+              purchaseDate: cPurchaseDate || null,
+              price: cPrice.trim() ? parseFloat(cPrice) || null : null,
+              frequency: cFrequency,
+              color: cColor,
+              colorHex: selectedColor?.hex || "#CCCCCC",
+            }
+          : item
+      )
     );
-    
-    // 同步更新到云端
-    if (updatedItem) {
-      syncItemToCloud(updatedItem, "daughter", "upsert");
-    }
-    
     setEditingItemId(null);
     setCName("");
     setCMainCategory("上衣");
@@ -1035,27 +664,17 @@ function App() {
   // Sets the end reason and date for a daughter clothing item.
 
   function setEndReasonForDaughter(id, reason) {
-    let updatedItem = null;
     setDaughterClothesItems((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          updatedItem = {
-            ...item,
-            endReason: reason,
-            endDate: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          return updatedItem;
-        }
-        return item;
-      })
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              endReason: reason,
+              endDate: new Date().toISOString(),
+            }
+          : item
+      )
     );
-    
-    // 同步更新到云端
-    if (updatedItem) {
-      syncItemToCloud(updatedItem, "daughter", "upsert");
-    }
-    
     setEndReasonItemId(null);
   }
 
@@ -1086,223 +705,22 @@ function App() {
   // - For beauty:
   //   - Placeholder text indicating this section is under development.
 
-  // Show login screen if not authenticated
-  if (!session) {
-    return (
-      <div style={{ 
-        padding: "clamp(16px, 4vw, 24px)", 
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "100vh",
-        gap: "clamp(16px, 4vw, 24px)",
-        boxSizing: "border-box"
-      }}>
-        <div style={{ 
-          textAlign: "center", 
-          maxWidth: 400, 
-          width: "100%",
-          padding: "0 16px",
-          boxSizing: "border-box"
-        }}>
-          <h1 style={{ 
-            marginBottom: 8,
-            fontSize: "clamp(24px, 6vw, 32px)"
-          }}>Grace&apos;s stuff</h1>
-          <p style={{ 
-            marginTop: 0, 
-            color: "#666", 
-            marginBottom: "clamp(24px, 6vw, 32px)",
-            fontSize: "clamp(13px, 3.5vw, 15px)"
-          }}>
-            Local-first. Simple. For my own use.
-          </p>
-          
-          <form onSubmit={handleAuthSubmit} style={{ 
-            display: "flex", 
-            flexDirection: "column", 
-            gap: "clamp(12px, 3vw, 16px)",
-            width: "100%",
-            maxWidth: 320,
-            margin: "0 auto"
-          }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <input
-                type="email"
-                placeholder="邮箱"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={loading}
-                autoComplete="email"
-                style={{
-                  padding: "clamp(12px, 3vw, 14px) clamp(14px, 3.5vw, 16px)",
-                  borderRadius: 8,
-                  border: "1px solid #ccc",
-                  fontSize: "clamp(14px, 3.5vw, 16px)",
-                  width: "100%",
-                  boxSizing: "border-box",
-                  WebkitAppearance: "none"
-                }}
-              />
-              <input
-                type="password"
-                placeholder="密码"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={loading}
-                minLength={6}
-                autoComplete={isSignUp ? "new-password" : "current-password"}
-                style={{
-                  padding: "clamp(12px, 3vw, 14px) clamp(14px, 3.5vw, 16px)",
-                  borderRadius: 8,
-                  border: "1px solid #ccc",
-                  fontSize: "clamp(14px, 3.5vw, 16px)",
-                  width: "100%",
-                  boxSizing: "border-box",
-                  WebkitAppearance: "none"
-                }}
-              />
-            </div>
-            
-            {authError && (
-              <div style={{
-                padding: "8px 12px",
-                borderRadius: 6,
-                backgroundColor: "#fee",
-                color: "#c33",
-                fontSize: 13,
-                textAlign: "left"
-              }}>
-                {authError}
-              </div>
-            )}
-            
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                padding: "clamp(12px, 3vw, 14px) clamp(20px, 5vw, 24px)",
-                borderRadius: 8,
-                border: "1px solid #ccc",
-                background: loading ? "#ccc" : "#fff",
-                cursor: loading ? "not-allowed" : "pointer",
-                fontSize: "clamp(15px, 4vw, 16px)",
-                fontWeight: 500,
-                width: "100%",
-                minHeight: "44px", // iOS recommended touch target size
-                WebkitAppearance: "none"
-              }}
-            >
-              {loading ? "处理中..." : (isSignUp ? "注册" : "登录")}
-            </button>
-            
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setAuthError("");
-                setEmail("");
-                setPassword("");
-              }}
-              disabled={loading}
-              style={{
-                padding: "clamp(8px, 2vw, 10px) clamp(14px, 3.5vw, 16px)",
-                borderRadius: 6,
-                border: "none",
-                background: "transparent",
-                cursor: loading ? "not-allowed" : "pointer",
-                fontSize: "clamp(13px, 3.5vw, 14px)",
-                color: "#666",
-                textDecoration: "underline",
-                minHeight: "44px" // iOS recommended touch target size
-              }}
-            >
-              {isSignUp ? "已有账号？去登录" : "没有账号？去注册"}
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ 
-      padding: "16px", 
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif",
-      maxWidth: "100%",
-      boxSizing: "border-box"
-    }}>
-      <div style={{ 
-        display: "flex", 
-        justifyContent: "space-between", 
-        alignItems: "flex-start", 
-        marginBottom: 16,
-        flexWrap: "wrap",
-        gap: 12
-      }}>
-        <div style={{ flex: "1", minWidth: "200px" }}>
-          <h1 style={{ marginBottom: 8, marginTop: 0, fontSize: "clamp(20px, 5vw, 28px)" }}>Grace&apos;s stuff</h1>
-          <p style={{ marginTop: 0, color: "#666", fontSize: "clamp(12px, 3vw, 14px)" }}>
-            Local-first. Simple. For my own use.
-          </p>
-        </div>
-        <div style={{ 
-          display: "flex", 
-          alignItems: "center", 
-          gap: 8,
-          flexWrap: "wrap"
-        }}>
-          {session?.user && (
-            <span style={{ 
-              color: "#666", 
-              fontSize: "clamp(11px, 2.5vw, 13px)",
-              wordBreak: "break-all",
-              maxWidth: "150px",
-              overflow: "hidden",
-              textOverflow: "ellipsis"
-            }}>
-              {session.user.email || session.user.user_metadata?.user_name || "已登录"}
-            </span>
-          )}
-          <button
-            onClick={signOut}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 8,
-              border: "1px solid #ccc",
-              background: "#fff",
-              cursor: "pointer",
-              fontSize: "clamp(12px, 3vw, 14px)",
-              color: "#666",
-              whiteSpace: "nowrap"
-            }}
-          >
-            登出
-          </button>
-        </div>
-      </div>
+    <div style={{ padding: 24, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif" }}>
+      <h1 style={{ marginBottom: 8 }}>Grace&apos;s stuff</h1>
+      <p style={{ marginTop: 0, color: "#666" }}>
+        Local-first. Simple. For my own use.
+      </p>
 
-      <div style={{ 
-        display: "flex", 
-        gap: 8, 
-        margin: "16px 0",
-        flexWrap: "wrap"
-      }}>
+      <div style={{ display: "flex", gap: 8, margin: "16px 0" }}>
         <button
           onClick={() => setCategory("clothes")}
           style={{
-            padding: "10px 14px",
-            borderRadius: 8,
+            padding: "8px 12px",
+            borderRadius: 10,
             border: "1px solid #ccc",
             background: category === "clothes" ? "#eee" : "white",
             cursor: "pointer",
-            fontSize: "clamp(13px, 3.5vw, 15px)",
-            flex: "1",
-            minWidth: "80px"
           }}
         >
           衣物
@@ -1311,14 +729,11 @@ function App() {
         <button
           onClick={() => setCategory("daughterClothes")}
           style={{
-            padding: "10px 14px",
-            borderRadius: 8,
+            padding: "8px 12px",
+            borderRadius: 10,
             border: "1px solid #ccc",
             background: category === "daughterClothes" ? "#eee" : "white",
             cursor: "pointer",
-            fontSize: "clamp(13px, 3.5vw, 15px)",
-            flex: "1",
-            minWidth: "100px"
           }}
         >
           我女儿的衣物
@@ -1327,14 +742,11 @@ function App() {
         <button
           onClick={() => setCategory("beauty")}
           style={{
-            padding: "10px 14px",
-            borderRadius: 8,
+            padding: "8px 12px",
+            borderRadius: 10,
             border: "1px solid #ccc",
             background: category === "beauty" ? "#eee" : "white",
             cursor: "pointer",
-            fontSize: "clamp(13px, 3.5vw, 15px)",
-            flex: "1",
-            minWidth: "90px"
           }}
         >
           护肤/化妆
@@ -1344,10 +756,8 @@ function App() {
       <div
         style={{
           border: "1px solid #e5e5e5",
-          borderRadius: 12,
-          padding: "clamp(12px, 3vw, 16px)",
-          maxWidth: "100%",
-          boxSizing: "border-box"
+          borderRadius: 14,
+          padding: 16,
         }}
       >
         {category === "clothes" ? (

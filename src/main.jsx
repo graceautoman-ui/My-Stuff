@@ -1,3 +1,4 @@
+import { supabase } from './lib/supabaseClient'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
@@ -8,3 +9,4 @@ createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>,
 )
+console.log('Supabase client:', supabase)
