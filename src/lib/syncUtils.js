@@ -4,13 +4,15 @@
  * 将本地衣物数据转换为数据库格式
  */
 export function localToDbItem(localItem, userId) {
-  // 处理 season：确保是数组格式
-  let season = localItem.season || ['四季'];
-  if (!Array.isArray(season)) {
-    // 如果是字符串，转换为数组
-    season = season ? [season] : ['四季'];
-  }
-  if (season.length === 0) {
+  // 处理 season：现在季节是单选（字符串），但数据库可能仍需要数组格式
+  let season = localItem.season || '四季';
+  // 如果是字符串，转换为数组（数据库格式）
+  if (typeof season === 'string') {
+    season = [season];
+  } else if (Array.isArray(season)) {
+    // 如果是数组，取第一个元素（兼容旧数据）
+    season = season.length > 0 ? [season[0]] : ['四季'];
+  } else {
     season = ['四季'];
   }
   
@@ -86,7 +88,10 @@ export function dbToLocalItem(dbItem) {
     name: dbItem.name,
     mainCategory: dbItem.main_category,
     subCategory: dbItem.sub_category,
-    season: dbItem.season || ['四季'],
+    // 数据库中的season是数组，转换为字符串（单选）
+    season: Array.isArray(dbItem.season) && dbItem.season.length > 0 
+      ? dbItem.season[0] 
+      : (typeof dbItem.season === 'string' ? dbItem.season : '四季'),
     purchaseDate: dbItem.purchase_date || null,
     price: dbItem.price !== null ? parseFloat(dbItem.price) : null,
     frequency: dbItem.frequency || '偶尔',
@@ -126,8 +131,23 @@ export function mergeItems(localItems, remoteItems) {
       if (localUpdated > remoteUpdated) {
         // 本地更新，保留本地版本
         merged.set(localItem.id, localItem);
+      } else {
+        // 远程更新，但需要保留本地数据中存在的字段（如果远程数据缺少这些字段）
+        const mergedItem = {
+          ...remoteItem,
+          // 保留本地数据中存在的字段，如果远程数据中这些字段为空或不存在
+          purchaseDate: remoteItem.purchaseDate || localItem.purchaseDate || null,
+          colorHex: remoteItem.colorHex || localItem.colorHex || '#000000',
+          subCategory: remoteItem.subCategory || localItem.subCategory || null,
+          mainCategory: remoteItem.mainCategory || localItem.mainCategory || null,
+          color: remoteItem.color || localItem.color || '黑色',
+          price: remoteItem.price !== null && remoteItem.price !== undefined ? remoteItem.price : (localItem.price !== null && localItem.price !== undefined ? localItem.price : null),
+          season: remoteItem.season || localItem.season || '四季',
+          endReason: remoteItem.endReason || localItem.endReason || null,
+          endDate: remoteItem.endDate || localItem.endDate || null,
+        };
+        merged.set(localItem.id, mergedItem);
       }
-      // 否则保留远程版本（已在 merged 中）
     }
   });
   
@@ -144,9 +164,11 @@ export async function uploadItemsToSupabase(supabase, items, userId, tableName) 
     const dbItems = items.map(item => {
       const dbItem = localToDbItem(item, userId);
       // 确保数据类型正确
-      // season 必须是数组
+      // season 必须是数组（数据库格式）
       if (!Array.isArray(dbItem.season)) {
         dbItem.season = dbItem.season ? [dbItem.season] : ['四季'];
+      } else if (dbItem.season.length === 0) {
+        dbItem.season = ['四季'];
       }
       // price 转换为数字或 null
       if (dbItem.price !== null && dbItem.price !== undefined) {

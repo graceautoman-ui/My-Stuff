@@ -174,23 +174,51 @@ function App() {
 
       console.log(`📥 下载完成: 衣物 ${clothesResult.items?.length || 0} 条, 女儿衣物 ${daughterResult.items?.length || 0} 条`);
 
-      // 2. 读取本地数据
-      const localClothes = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      const localDaughter = JSON.parse(localStorage.getItem(STORAGE_KEY_DAUGHTER) || "[]");
+      // 2. 读取本地数据并映射频率值
+      const localClothesRaw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      const localDaughterRaw = JSON.parse(localStorage.getItem(STORAGE_KEY_DAUGHTER) || "[]");
+      const localClothes = localClothesRaw.map(item => ({
+        ...item,
+        frequency: mapFrequency(item.frequency),
+        season: mapSeason(item.season)
+      }));
+      const localDaughter = localDaughterRaw.map(item => ({
+        ...item,
+        frequency: mapFrequency(item.frequency),
+        season: mapSeason(item.season)
+      }));
       console.log(`💾 本地数据: 衣物 ${localClothes.length} 条, 女儿衣物 ${localDaughter.length} 条`);
 
-      // 3. 合并数据（处理冲突）
-      const mergedClothes = mergeItems(localClothes, clothesResult.items || []);
-      const mergedDaughter = mergeItems(localDaughter, daughterResult.items || []);
+      // 3. 转换远程数据格式并映射频率值
+      const remoteClothes = (clothesResult.items || []).map(item => {
+        const localItem = dbToLocalItem(item);
+        return {
+          ...localItem,
+          frequency: mapFrequency(localItem.frequency),
+          season: mapSeason(localItem.season)
+        };
+      });
+      const remoteDaughter = (daughterResult.items || []).map(item => {
+        const localItem = dbToLocalItem(item);
+        return {
+          ...localItem,
+          frequency: mapFrequency(localItem.frequency),
+          season: mapSeason(localItem.season)
+        };
+      });
+
+      // 4. 合并数据（处理冲突）
+      const mergedClothes = mergeItems(localClothes, remoteClothes);
+      const mergedDaughter = mergeItems(localDaughter, remoteDaughter);
       console.log(`🔄 合并后: 衣物 ${mergedClothes.length} 条, 女儿衣物 ${mergedDaughter.length} 条`);
 
-      // 4. 更新状态和本地存储
+      // 5. 更新状态和本地存储
       setClothesItems(mergedClothes);
       setDaughterClothesItems(mergedDaughter);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedClothes));
       localStorage.setItem(STORAGE_KEY_DAUGHTER, JSON.stringify(mergedDaughter));
 
-      // 5. 上传合并后的数据到云端（确保云端是最新的）
+      // 6. 上传合并后的数据到云端（确保云端是最新的）
       console.log("📤 上传数据到云端...");
       const [uploadClothesResult, uploadDaughterResult] = await Promise.all([
         uploadItemsToSupabase(supabase, mergedClothes, userId, "clothes_items"),
@@ -212,7 +240,7 @@ function App() {
 
       console.log(`📤 上传完成: 衣物 ${uploadClothesResult.count || 0} 条, 女儿衣物 ${uploadDaughterResult.count || 0} 条`);
 
-      // 6. 订阅实时更新
+      // 7. 订阅实时更新
       subscribeToRealtimeUpdates(userId);
 
       console.log("✅ 同步初始化完成");
@@ -277,7 +305,12 @@ function App() {
     const { eventType, new: newItem, old: oldItem } = payload;
 
     if (eventType === "INSERT" || eventType === "UPDATE") {
-      const localItem = dbToLocalItem(newItem);
+      const dbItem = dbToLocalItem(newItem);
+      const localItem = { 
+        ...dbItem, 
+        frequency: mapFrequency(dbItem.frequency),
+        season: mapSeason(dbItem.season)
+      };
       if (type === "clothes") {
         setClothesItems((prev) => {
           const existing = prev.find((item) => item.id === localItem.id);
@@ -286,9 +319,22 @@ function App() {
             const existingUpdated = new Date(existing.updatedAt || existing.createdAt || 0);
             const newUpdated = new Date(localItem.updatedAt || localItem.createdAt || 0);
             if (newUpdated > existingUpdated) {
-              // 远程更新，更新本地
+              // 远程更新，更新本地，但保留本地数据中存在的字段（如果远程数据缺少这些字段）
+              const mergedItem = {
+                ...existing, // 先保留本地数据的所有字段
+                ...localItem, // 然后用远程数据覆盖
+                // 确保关键字段不会丢失（如果远程数据为空，使用本地数据）
+                purchaseDate: localItem.purchaseDate || existing.purchaseDate || null,
+                colorHex: localItem.colorHex || existing.colorHex || '#000000',
+                subCategory: localItem.subCategory || existing.subCategory || null,
+                mainCategory: localItem.mainCategory || existing.mainCategory || null,
+                color: localItem.color || existing.color || '黑色',
+                price: localItem.price !== null && localItem.price !== undefined ? localItem.price : (existing.price !== null && existing.price !== undefined ? existing.price : null),
+                season: mapSeason(localItem.season || existing.season || '四季'),
+                updatedAt: localItem.updatedAt, // 使用远程的更新时间
+              };
               const updated = prev.map((item) =>
-                item.id === localItem.id ? { ...localItem, updatedAt: localItem.updatedAt } : item
+                item.id === localItem.id ? mergedItem : item
               );
               // 同时更新 localStorage
               localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
@@ -309,8 +355,22 @@ function App() {
             const existingUpdated = new Date(existing.updatedAt || existing.createdAt || 0);
             const newUpdated = new Date(localItem.updatedAt || localItem.createdAt || 0);
             if (newUpdated > existingUpdated) {
+              // 远程更新，更新本地，但保留本地数据中存在的字段（如果远程数据缺少这些字段）
+              const mergedItem = {
+                ...existing, // 先保留本地数据的所有字段
+                ...localItem, // 然后用远程数据覆盖
+                // 确保关键字段不会丢失（如果远程数据为空，使用本地数据）
+                purchaseDate: localItem.purchaseDate || existing.purchaseDate || null,
+                colorHex: localItem.colorHex || existing.colorHex || '#000000',
+                subCategory: localItem.subCategory || existing.subCategory || null,
+                mainCategory: localItem.mainCategory || existing.mainCategory || null,
+                color: localItem.color || existing.color || '黑色',
+                price: localItem.price !== null && localItem.price !== undefined ? localItem.price : (existing.price !== null && existing.price !== undefined ? existing.price : null),
+                season: mapSeason(localItem.season || existing.season || '四季'),
+                updatedAt: localItem.updatedAt, // 使用远程的更新时间
+              };
               const updated = prev.map((item) =>
-                item.id === localItem.id ? { ...localItem, updatedAt: localItem.updatedAt } : item
+                item.id === localItem.id ? mergedItem : item
               );
               localStorage.setItem(STORAGE_KEY_DAUGHTER, JSON.stringify(updated));
               return updated;
@@ -472,24 +532,35 @@ function App() {
         return item && typeof item === 'object' && item.name && item.id;
       };
 
-      const validClothes = Array.isArray(clothesData) ? clothesData.filter(validateItem) : [];
-      const validDaughter = Array.isArray(daughterData) ? daughterData.filter(validateItem) : [];
+      // 应用频率和季节映射
+      const validClothes = Array.isArray(clothesData) ? clothesData.filter(validateItem).map(item => ({
+        ...item,
+        frequency: mapFrequency(item.frequency),
+        season: mapSeason(item.season)
+      })) : [];
+      const validDaughter = Array.isArray(daughterData) ? daughterData.filter(validateItem).map(item => ({
+        ...item,
+        frequency: mapFrequency(item.frequency),
+        season: mapSeason(item.season)
+      })) : [];
 
       if (validClothes.length === 0 && validDaughter.length === 0) {
         throw new Error("未找到有效的数据，请检查数据格式");
       }
 
-      // 为每个项目添加 updatedAt（如果不存在）
+      // 为每个项目添加 updatedAt（如果不存在），并映射频率值
       const processedClothes = validClothes.map(item => ({
         ...item,
         updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
         createdAt: item.createdAt || new Date().toISOString(),
+        frequency: mapFrequency(item.frequency),
       }));
 
       const processedDaughter = validDaughter.map(item => ({
         ...item,
         updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
         createdAt: item.createdAt || new Date().toISOString(),
+        frequency: mapFrequency(item.frequency),
       }));
 
       // 合并到现有数据（避免重复）
@@ -593,7 +664,24 @@ function App() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) return [];
+      // 映射历史数据的频率值和季节值
+      return parsed.map(item => ({
+        ...item,
+        frequency: item.frequency ? (() => {
+          const frequencyMap = {
+            "从未": "从未",
+            "很少": "偶尔",
+            "偶尔": "偶尔",
+            "每月几次": "有时",
+            "每周一次": "有时",
+            "每周多次": "经常",
+            "每天": "每天",
+          };
+          return frequencyMap[item.frequency] || "偶尔";
+        })() : "偶尔",
+        season: mapSeason(item.season)
+      }));
     } catch {
       return [];
     }
@@ -608,7 +696,24 @@ function App() {
       const raw = localStorage.getItem(STORAGE_KEY_DAUGHTER);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) return [];
+      // 映射历史数据的频率值和季节值
+      return parsed.map(item => ({
+        ...item,
+        frequency: item.frequency ? (() => {
+          const frequencyMap = {
+            "从未": "从未",
+            "很少": "偶尔",
+            "偶尔": "偶尔",
+            "每月几次": "有时",
+            "每周一次": "有时",
+            "每周多次": "经常",
+            "每天": "每天",
+          };
+          return frequencyMap[item.frequency] || "偶尔";
+        })() : "偶尔",
+        season: mapSeason(item.season)
+      }));
     } catch {
       return [];
     }
@@ -620,7 +725,7 @@ function App() {
   const [cName, setCName] = useState("");
   const [cMainCategory, setCMainCategory] = useState("上衣");
   const [cSubCategory, setCSubCategory] = useState("T恤");
-  const [cSeason, setCSeason] = useState(["四季"]); // Array for multi-select
+  const [cSeason, setCSeason] = useState("四季"); // String for single-select
   const [cPurchaseDate, setCPurchaseDate] = useState("");
   const [cPrice, setCPrice] = useState("");
   const [cFrequency, setCFrequency] = useState("偶尔");
@@ -639,13 +744,17 @@ function App() {
   // Section 2c-3: Filter States
   // Filter states for main category and subcategory.
 
+  const [filterYear, setFilterYear] = useState(""); // "" | "YYYY"
+  const [filterSeason, setFilterSeason] = useState(""); // "" | season
   const [filterMainCategory, setFilterMainCategory] = useState(""); // "" | mainCategory
   const [filterSubCategory, setFilterSubCategory] = useState(""); // "" | subCategory
 
-  // Section 2c-4: Season Dropdown State
-  // Controls the visibility of the season dropdown menu.
+  // Section 2c-5: Selected Item State
+  // Tracks which item is currently selected for single selection, or Set for batch delete.
 
-  const [seasonDropdownOpen, setSeasonDropdownOpen] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState(null); // null | itemId for single selection
+  const [selectedItemIds, setSelectedItemIds] = useState(new Set()); // Set<itemId> for batch delete (only when using "全选")
+
 
   // Section 2d: Clothes Categories Definition
   // Main categories and their subcategories for clothing classification.
@@ -693,9 +802,40 @@ function App() {
   // A memoized list of seasons for clothing items.
 
   const seasons = useMemo(
-    () => ["四季", "春秋", "夏", "冬"],
+    () => ["四季", "春夏", "秋冬"],
     []
   );
+
+  // Section 2d-4: Available Years Memoization
+  // Extracts all unique years from purchaseDate fields in both clothesItems and daughterClothesItems.
+
+  const availableYears = useMemo(() => {
+    const yearSet = new Set();
+    
+    // Extract years from clothesItems
+    clothesItems.forEach(item => {
+      if (item.purchaseDate) {
+        // purchaseDate format: "YYYY-MM" or "YYYY"
+        const year = item.purchaseDate.split('-')[0];
+        if (year && year.length === 4) {
+          yearSet.add(year);
+        }
+      }
+    });
+    
+    // Extract years from daughterClothesItems
+    daughterClothesItems.forEach(item => {
+      if (item.purchaseDate) {
+        const year = item.purchaseDate.split('-')[0];
+        if (year && year.length === 4) {
+          yearSet.add(year);
+        }
+      }
+    });
+    
+    // Sort years in descending order (newest first)
+    return Array.from(yearSet).sort((a, b) => b.localeCompare(a));
+  }, [clothesItems, daughterClothesItems]);
 
   // Section 2d-3-1: Years and Months for Date Picker
   // Generate years from 2020 to current year, and months 1-12.
@@ -716,8 +856,33 @@ function App() {
   // Section 2d-4: Frequency Options
   // A memoized list of frequency options for wearing clothes.
 
+  // Section 2d-4-1: Frequency Mapping Function
+  // Maps old frequency values to new frequency values for data migration.
+
+  const mapFrequency = (oldFrequency) => {
+    if (!oldFrequency) return "偶尔"; // 默认值
+    
+    // 如果已经是新格式的值，直接返回
+    const newFrequencies = ["从未", "偶尔", "有时", "经常", "每天"];
+    if (newFrequencies.includes(oldFrequency)) {
+      return oldFrequency;
+    }
+    
+    const frequencyMap = {
+      "从未": "从未",
+      "很少": "偶尔",
+      "偶尔": "偶尔",
+      "每月几次": "有时",
+      "每周一次": "有时",
+      "每周多次": "经常",
+      "每天": "每天",
+    };
+    
+    return frequencyMap[oldFrequency] || "偶尔"; // 如果找不到映射，使用默认值
+  };
+
   const frequencies = useMemo(
-    () => ["每天", "每周多次", "每周一次", "每月几次", "偶尔", "很少", "从未"],
+    () => ["从未", "偶尔", "有时", "经常", "每天"],
     []
   );
 
@@ -821,22 +986,62 @@ function App() {
     return subCategoryIcons[subCategory] || "👕";
   }
 
+  // Section 2d-7-0: Map Season Data
+  // Maps old season values to new single-select options.
+  // Mapping rules:
+  // - 四季 -> 四季
+  // - 春秋 -> 春夏
+  // - 夏 -> 春夏
+  // - 冬 -> 秋冬
+  // For arrays, maps each element and returns the first mapped value (or "四季" as default).
+
+  function mapSeason(season) {
+    if (!season) return "四季";
+    
+    // Handle array format (old multi-select)
+    if (Array.isArray(season)) {
+      if (season.length === 0) return "四季";
+      // Map each season and return the first one
+      // Priority: if contains "四季", return "四季"; else map the first one
+      if (season.includes("四季")) return "四季";
+      if (season.includes("春秋")) return "春夏";
+      if (season.includes("夏")) return "春夏";
+      if (season.includes("冬")) return "秋冬";
+      // If array contains new format, return the first one
+      if (season.includes("春夏")) return "春夏";
+      if (season.includes("秋冬")) return "秋冬";
+      // Fallback: map the first element
+      const first = season[0];
+      if (first === "四季") return "四季";
+      if (first === "春秋") return "春夏";
+      if (first === "夏") return "春夏";
+      if (first === "冬") return "秋冬";
+      return first; // Already in new format
+    }
+    
+    // Handle string format
+    if (season === "四季") return "四季";
+    if (season === "春秋") return "春夏";
+    if (season === "夏") return "春夏";
+    if (season === "冬") return "秋冬";
+    // Already in new format
+    if (season === "春夏" || season === "秋冬") return season;
+    // Unknown value, default to "四季"
+    return "四季";
+  }
+
   // Section 2d-7-1: Normalize Season Data
-  // Converts season data to array format (handles legacy string format).
+  // Converts season data to string format (single-select).
 
   function normalizeSeason(season) {
-    if (!season) return ["四季"];
-    if (Array.isArray(season)) return season.length > 0 ? season : ["四季"];
-    // Legacy: string format
-    return [season];
+    return mapSeason(season);
   }
 
   // Section 2d-7-2: Format Season for Display
-  // Formats season array as comma-separated string for display.
+  // Returns the season string directly (no formatting needed for single-select).
 
   function formatSeasonForDisplay(season) {
-    const normalized = normalizeSeason(season);
-    return normalized.join("、");
+    return normalizeSeason(season);
   }
 
   // Section 2d-7-3: Parse Purchase Date
@@ -872,12 +1077,16 @@ function App() {
 
   // Section 2c-1: Handle Main Category Change
   // When main category changes, reset subcategory to the first option of the new category.
+  // But only if the current subcategory is not in the new category's subcategories list.
 
   useEffect(() => {
     if (currentSubCategories.length > 0) {
-      setCSubCategory(currentSubCategories[0]);
+      // 如果当前子分类不在新主分类的选项列表中，才重置为第一个选项
+      if (!currentSubCategories.includes(cSubCategory)) {
+        setCSubCategory(currentSubCategories[0]);
+      }
     }
-  }, [cMainCategory, currentSubCategories]);
+  }, [cMainCategory, currentSubCategories, cSubCategory]);
 
   // Section 2e-0: Sorted and Filtered Clothes Items
   // Sorts clothes items: items with endReason go to the end.
@@ -886,6 +1095,23 @@ function App() {
   const sortedClothesItems = useMemo(() => {
     let filtered = clothesItems;
     
+    // Filter by year if set
+    if (filterYear) {
+      filtered = filtered.filter((item) => {
+        if (!item.purchaseDate) return false;
+        const year = item.purchaseDate.split('-')[0];
+        return year === filterYear;
+      });
+    }
+    
+    // Filter by season if set
+    if (filterSeason) {
+      filtered = filtered.filter((item) => {
+        const itemSeason = mapSeason(item.season);
+        return itemSeason === filterSeason;
+      });
+    }
+    
     // Filter by main category if set
     if (filterMainCategory) {
       filtered = filtered.filter((item) => item.mainCategory === filterMainCategory);
@@ -899,7 +1125,7 @@ function App() {
     const active = filtered.filter((item) => !item.endReason);
     const ended = filtered.filter((item) => item.endReason);
     return [...active, ...ended];
-  }, [clothesItems, filterMainCategory, filterSubCategory]);
+  }, [clothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory]);
 
   // Section 2e-0-1: Sorted and Filtered Daughter Clothes Items
   // Sorts daughter clothes items: items with endReason go to the end.
@@ -908,6 +1134,23 @@ function App() {
   const sortedDaughterClothesItems = useMemo(() => {
     let filtered = daughterClothesItems;
     
+    // Filter by year if set
+    if (filterYear) {
+      filtered = filtered.filter((item) => {
+        if (!item.purchaseDate) return false;
+        const year = item.purchaseDate.split('-')[0];
+        return year === filterYear;
+      });
+    }
+    
+    // Filter by season if set
+    if (filterSeason) {
+      filtered = filtered.filter((item) => {
+        const itemSeason = mapSeason(item.season);
+        return itemSeason === filterSeason;
+      });
+    }
+    
     // Filter by main category if set
     if (filterMainCategory) {
       filtered = filtered.filter((item) => item.mainCategory === filterMainCategory);
@@ -921,7 +1164,7 @@ function App() {
     const active = filtered.filter((item) => !item.endReason);
     const ended = filtered.filter((item) => item.endReason);
     return [...active, ...ended];
-  }, [daughterClothesItems, filterMainCategory, filterSubCategory]);
+  }, [daughterClothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory]);
 
   // Section 2e-0-2: Filter Statistics for Clothes Items
   // Calculates statistics for filtered clothes items: count and total price.
@@ -950,6 +1193,13 @@ function App() {
   // Section 2e: Persist Clothes Items to Local Storage
   // Whenever `clothesItems` changes, save the updated array to localStorage.
   // This keeps user data persistent between sessions.
+
+  // Section 2e-0: Migrate Frequency Values
+  // On component mount, check and migrate all frequency values in existing data.
+  // This ensures all historical data is properly mapped to new frequency options.
+
+  // 注意：数据迁移已在useState初始化时完成，这里不再需要额外的迁移逻辑
+  // 如果未来需要迁移其他字段，可以在这里添加
 
   useEffect(() => {
     try {
@@ -1006,10 +1256,10 @@ function App() {
       name,
       mainCategory: cMainCategory,
       subCategory: cSubCategory,
-      season: cSeason,
+      season: mapSeason(cSeason),
       purchaseDate: cPurchaseDate || null,
       price: cPrice.trim() ? parseFloat(cPrice) || null : null,
-      frequency: cFrequency,
+      frequency: mapFrequency(cFrequency),
       color: cColor,
       colorHex: selectedColor?.hex || "#CCCCCC",
       createdAt: new Date().toISOString(),
@@ -1024,7 +1274,7 @@ function App() {
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤");
-    setCSeason(["四季"]);
+    setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
     setCFrequency("偶尔");
@@ -1061,10 +1311,10 @@ function App() {
             name,
             mainCategory: cMainCategory,
             subCategory: cSubCategory,
-            season: cSeason,
+            season: mapSeason(cSeason),
             purchaseDate: cPurchaseDate || null,
             price: cPrice.trim() ? parseFloat(cPrice) || null : null,
-            frequency: cFrequency,
+            frequency: mapFrequency(cFrequency),
             color: cColor,
             colorHex: selectedColor?.hex || "#CCCCCC",
             updatedAt: new Date().toISOString(),
@@ -1081,10 +1331,14 @@ function App() {
     }
     
     setEditingItemId(null);
+    // 保存完成后，清除选中状态
+    if (selectedItemId === id) {
+      setSelectedItemId(null);
+    }
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤");
-    setCSeason(["四季"]);
+    setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
     setCFrequency("偶尔");
@@ -1097,12 +1351,19 @@ function App() {
   function startEditClothesItem(item) {
     setEditingItemId(item.id);
     setCName(item.name);
-    setCMainCategory(item.mainCategory || "上衣");
-    setCSubCategory(item.subCategory || "T恤");
+    const mainCategory = item.mainCategory || "上衣";
+    // 确保子分类在主分类的选项列表中，否则使用该主分类的第一个选项
+    const availableSubCategories = clothesCategories[mainCategory] || [];
+    const subCategory = item.subCategory && availableSubCategories.includes(item.subCategory)
+      ? item.subCategory
+      : (availableSubCategories[0] || "其他");
+    // 先设置主分类，然后立即设置子分类
+    setCMainCategory(mainCategory);
+    setCSubCategory(subCategory);
     setCSeason(normalizeSeason(item.season));
     setCPurchaseDate(item.purchaseDate || "");
     setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
-    setCFrequency(item.frequency || "偶尔");
+    setCFrequency(mapFrequency(item.frequency || "偶尔"));
     setCColor(item.color || "黑色");
   }
 
@@ -1114,7 +1375,7 @@ function App() {
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤");
-    setCSeason(["四季"]);
+    setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
     setCFrequency("偶尔");
@@ -1132,7 +1393,7 @@ function App() {
     setCSeason(normalizeSeason(item.season));
     setCPurchaseDate(item.purchaseDate || "");
     setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
-    setCFrequency(item.frequency || "偶尔");
+    setCFrequency(mapFrequency(item.frequency || "偶尔"));
     setCColor("黑色"); // Reset color so user can choose different color
     // Scroll to form area (optional, but helpful UX)
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1180,10 +1441,10 @@ function App() {
       name,
       mainCategory: cMainCategory,
       subCategory: cSubCategory,
-      season: cSeason,
+      season: mapSeason(cSeason),
       purchaseDate: cPurchaseDate || null,
       price: cPrice.trim() ? parseFloat(cPrice) || null : null,
-      frequency: cFrequency,
+      frequency: mapFrequency(cFrequency),
       color: cColor,
       colorHex: selectedColor?.hex || "#CCCCCC",
       createdAt: new Date().toISOString(),
@@ -1198,7 +1459,7 @@ function App() {
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤");
-    setCSeason(["四季"]);
+    setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
     setCFrequency("偶尔");
@@ -1235,10 +1496,10 @@ function App() {
             name,
             mainCategory: cMainCategory,
             subCategory: cSubCategory,
-            season: cSeason,
+            season: mapSeason(cSeason),
             purchaseDate: cPurchaseDate || null,
             price: cPrice.trim() ? parseFloat(cPrice) || null : null,
-            frequency: cFrequency,
+            frequency: mapFrequency(cFrequency),
             color: cColor,
             colorHex: selectedColor?.hex || "#CCCCCC",
             updatedAt: new Date().toISOString(),
@@ -1255,10 +1516,14 @@ function App() {
     }
     
     setEditingItemId(null);
+    // 保存完成后，清除选中状态
+    if (selectedItemId === id) {
+      setSelectedItemId(null);
+    }
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤");
-    setCSeason(["四季"]);
+    setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
     setCFrequency("偶尔");
@@ -1271,12 +1536,19 @@ function App() {
   function startEditDaughterClothesItem(item) {
     setEditingItemId(item.id);
     setCName(item.name);
-    setCMainCategory(item.mainCategory || "上衣");
-    setCSubCategory(item.subCategory || "T恤");
+    const mainCategory = item.mainCategory || "上衣";
+    // 确保子分类在主分类的选项列表中，否则使用该主分类的第一个选项
+    const availableSubCategories = clothesCategories[mainCategory] || [];
+    const subCategory = item.subCategory && availableSubCategories.includes(item.subCategory)
+      ? item.subCategory
+      : (availableSubCategories[0] || "其他");
+    // 先设置主分类，然后立即设置子分类
+    setCMainCategory(mainCategory);
+    setCSubCategory(subCategory);
     setCSeason(normalizeSeason(item.season));
     setCPurchaseDate(item.purchaseDate || "");
     setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
-    setCFrequency(item.frequency || "偶尔");
+    setCFrequency(mapFrequency(item.frequency || "偶尔"));
     setCColor(item.color || "黑色");
   }
 
@@ -1319,7 +1591,7 @@ function App() {
     setCSeason(normalizeSeason(item.season));
     setCPurchaseDate(item.purchaseDate || "");
     setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
-    setCFrequency(item.frequency || "偶尔");
+    setCFrequency(mapFrequency(item.frequency || "偶尔"));
     setCColor("黑色"); // Reset color so user can choose different color
     // Scroll to form area (optional, but helpful UX)
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1362,11 +1634,19 @@ function App() {
           }}>Grace&apos;s stuff</h1>
           <p style={{ 
             marginTop: 0, 
-            color: "#666", 
+            color: "#2d8659", 
             marginBottom: "clamp(24px, 6vw, 32px)",
-            fontSize: "clamp(13px, 3.5vw, 15px)"
+            fontSize: "clamp(18px, 5vw, 24px)",
+            fontWeight: 700,
+            letterSpacing: "0.5px",
+            textAlign: "center",
+            padding: "clamp(12px, 3vw, 16px)",
+            backgroundColor: "#f0f7ff",
+            borderRadius: "12px",
+            boxShadow: "0 2px 8px rgba(0, 102, 204, 0.15)",
+            whiteSpace: "nowrap"
           }}>
-            Local-first. Simple. For my own use.
+            Less is more-长期主义
           </p>
           
           <form onSubmit={handleAuthSubmit} style={{ 
@@ -1495,8 +1775,20 @@ function App() {
       }}>
         <div style={{ flex: "1", minWidth: "200px" }}>
           <h1 style={{ marginBottom: 8, marginTop: 0, fontSize: "clamp(20px, 5vw, 28px)" }}>Grace&apos;s stuff</h1>
-          <p style={{ marginTop: 0, color: "#666", fontSize: "clamp(12px, 3vw, 14px)" }}>
-            Local-first. Simple. For my own use.
+          <p style={{ 
+            marginTop: 0, 
+            color: "#2d8659", 
+            fontSize: "clamp(16px, 4vw, 20px)",
+            fontWeight: 700,
+            letterSpacing: "0.5px",
+            padding: "clamp(10px, 2.5vw, 14px)",
+            backgroundColor: "#f0f7ff",
+            borderRadius: "10px",
+            boxShadow: "0 2px 6px rgba(0, 102, 204, 0.15)",
+            marginBottom: 8,
+            whiteSpace: "nowrap"
+          }}>
+            Less is more-长期主义
           </p>
         </div>
         <div style={{ 
@@ -1604,7 +1896,11 @@ function App() {
         flexWrap: "wrap"
       }}>
         <button
-          onClick={() => setCategory("clothes")}
+          onClick={() => {
+            setCategory("clothes");
+            setSelectedItemId(null);
+            setSelectedItemIds(new Set());
+          }}
           style={{
             padding: "10px 14px",
             borderRadius: 8,
@@ -1616,11 +1912,15 @@ function App() {
             minWidth: "80px"
           }}
         >
-          衣物
+          Grace的衣物
         </button>
 
         <button
-          onClick={() => setCategory("daughterClothes")}
+          onClick={() => {
+            setCategory("daughterClothes");
+            setSelectedItemId(null);
+            setSelectedItemIds(new Set());
+          }}
           style={{
             padding: "10px 14px",
             borderRadius: 8,
@@ -1632,11 +1932,15 @@ function App() {
             minWidth: "100px"
           }}
         >
-          我女儿的衣物
+          Skye的衣物
         </button>
 
         <button
-          onClick={() => setCategory("beauty")}
+          onClick={() => {
+            setCategory("beauty");
+            setSelectedItemId(null);
+            setSelectedItemIds(new Set());
+          }}
           style={{
             padding: "10px 14px",
             borderRadius: 8,
@@ -1662,8 +1966,8 @@ function App() {
         }}
       >
         {category === "clothes" ? (
-          <div>
-            <h2 style={{ marginTop: 0 }}>衣物</h2>
+          <div style={{ paddingBottom: sortedClothesItems.length > 0 ? "80px" : "0" }}>
+            <h2 style={{ marginTop: 0 }}>Grace的衣物</h2>
 
             {/* Filter Section */}
             <div
@@ -1680,6 +1984,42 @@ function App() {
               }}
             >
               <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>筛选：</span>
+              <select
+                value={filterYear}
+                onChange={(e) => setFilterYear(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  marginRight: 8,
+                }}
+              >
+                <option value="">全部年份</option>
+                {availableYears.map((year) => (
+                  <option key={year} value={year}>
+                    {year}年
+                  </option>
+                ))}
+              </select>
+              <select
+                value={filterSeason}
+                onChange={(e) => setFilterSeason(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  marginRight: 8,
+                }}
+              >
+                <option value="">全部季节</option>
+                {seasons.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
               <select
                 value={filterMainCategory}
                 onChange={(e) => {
@@ -1722,9 +2062,11 @@ function App() {
                 ))}
               </select>
 
-              {(filterMainCategory || filterSubCategory) && (
+              {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
                 <button
                   onClick={() => {
+                    setFilterYear("");
+                    setFilterSeason("");
                     setFilterMainCategory("");
                     setFilterSubCategory("");
                   }}
@@ -1743,7 +2085,7 @@ function App() {
             </div>
 
             {/* Filter Statistics */}
-            {(filterMainCategory || filterSubCategory) && (
+            {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
               <div
                 style={{
                   margin: "8px 0 12px 0",
@@ -1820,100 +2162,21 @@ function App() {
                 ))}
               </select>
 
-              <div style={{ position: "relative" }}>
-                <button
-                  type="button"
-                  onClick={() => setSeasonDropdownOpen(!seasonDropdownOpen)}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
-                    backgroundColor: "#fff",
-                    cursor: "pointer",
-                    minWidth: 120,
-                    textAlign: "left",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    fontSize: "inherit",
-                    fontWeight: "normal",
-                    fontFamily: "inherit",
-                    lineHeight: "normal",
-                    height: "auto",
-                  }}
-                >
-                  <span style={{ fontSize: "inherit", fontWeight: "normal" }}>{formatSeasonForDisplay(cSeason)}</span>
-                  <span style={{ marginLeft: 8, fontSize: "inherit", fontWeight: "normal" }}>{seasonDropdownOpen ? "▲" : "▼"}</span>
-                </button>
-                {seasonDropdownOpen && (
-                  <>
-                    <div
-                      style={{
-                        position: "fixed",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        zIndex: 100,
-                      }}
-                      onClick={() => setSeasonDropdownOpen(false)}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        left: 0,
-                        marginTop: 4,
-                        padding: 8,
-                        borderRadius: 8,
-                        border: "1px solid #ccc",
-                        backgroundColor: "#fff",
-                        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                        zIndex: 101,
-                        minWidth: 150,
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {seasons.map((s) => (
-                        <label
-                          key={s}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            cursor: "pointer",
-                            fontSize: 14,
-                            padding: "6px 8px",
-                            borderRadius: 4,
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = "#f5f5f5";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = "transparent";
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={cSeason.includes(s)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setCSeason([...cSeason, s]);
-                              } else {
-                                const newSeasons = cSeason.filter((season) => season !== s);
-                                // Ensure at least one season is selected
-                                setCSeason(newSeasons.length > 0 ? newSeasons : ["四季"]);
-                              }
-                            }}
-                            style={{ cursor: "pointer" }}
-                          />
-                          <span>{s}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
+              <select
+                value={cSeason}
+                onChange={(e) => setCSeason(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                }}
+              >
+                {seasons.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
 
               {(() => {
                 const currentDate = parsePurchaseDate(cPurchaseDate);
@@ -2061,25 +2324,69 @@ function App() {
                 </p>
               ) : (
                 <div style={{ display: "grid", gap: 10 }}>
-                  {sortedClothesItems.map((it) => (
-                    <div
-                      key={it.id}
-                      style={{
-                        border: "1px solid #eee",
-                        borderRadius: 12,
-                        padding: 12,
-                        opacity: it.endReason ? 0.6 : 1,
-                        backgroundColor: it.endReason ? "#f5f5f5" : "transparent",
-                      }}
-                    >
-                      <div>
+                  {/* 表头 */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                      gap: 8,
+                      padding: "8px 12px",
+                      backgroundColor: "#f5f5f5",
+                      borderRadius: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#333",
+                      border: "1px solid #e0e0e0",
+                    }}
+                  >
+                    <div>购入时间</div>
+                    <div>购入时长</div>
+                    <div>价格</div>
+                    <div>季节</div>
+                    <div>穿着频度</div>
+                    <div>颜色</div>
+                  </div>
+                  {sortedClothesItems.map((it) => {
+                    const isSelected = selectedItemId === it.id || selectedItemIds.has(it.id) || editingItemId === it.id;
+                    return (
+                      <div
+                        key={it.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // 如果是全选模式，不处理单个点击
+                          if (selectedItemIds.size > 0 && !selectedItemIds.has(it.id)) {
+                            return; // 全选模式下，只允许通过全选按钮操作
+                          }
+                          // 单选模式
+                          if (selectedItemId === it.id) {
+                            setSelectedItemId(null);
+                            setSelectedItemIds(new Set());
+                          } else {
+                            setSelectedItemId(it.id);
+                            setSelectedItemIds(new Set());
+                          }
+                        }}
+                        style={{
+                          border: isSelected ? "2px solid #0066cc" : "1px solid #eee",
+                          borderRadius: 12,
+                          padding: 12,
+                          opacity: it.endReason ? 0.6 : 1,
+                          backgroundColor: isSelected 
+                            ? "#e6f2ff" 
+                            : it.endReason 
+                              ? "#f5f5f5" 
+                              : "transparent",
+                          cursor: "pointer",
+                          transition: "all 0.2s ease",
+                        }}
+                      >
                         <div
                           style={{
                             display: "flex",
                             justifyContent: "space-between",
                             gap: 12,
                             marginBottom: 8,
-                            alignItems: "flex-start",
+                            alignItems: "center",
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2110,157 +2417,272 @@ function App() {
                             )}
                             <div style={{ fontWeight: 700 }}>{it.name}</div>
                           </div>
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                            <div style={{ color: "#666", fontSize: 14 }}>
-                              <div>
-                                {it.mainCategory && it.subCategory
-                                  ? `${it.mainCategory} · ${it.subCategory}`
-                                  : it.type || "未分类"}
-                              </div>
-                              <div style={{ marginTop: 4, color: "#888" }}>
-                                {formatSeasonForDisplay(it.season)}
-                              </div>
-                            </div>
-                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                              <button
-                                onClick={() => startEditClothesItem(it)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: 6,
-                                  border: "1px solid #ccc",
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: "#666",
-                                  whiteSpace: "nowrap",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                编辑
-                              </button>
-                              <button
-                                onClick={() => copyClothesItem(it)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: 6,
-                                  border: "1px solid #ccc",
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: "#666",
-                                  whiteSpace: "nowrap",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                复制
-                              </button>
-                              <button
-                                onClick={() => setEndReasonItemId(it.id)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: 6,
-                                  border: "1px solid #ccc",
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: "#666",
-                                  whiteSpace: "nowrap",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                {it.endReason || "缘尽"}
-                              </button>
-                              <button
-                                onClick={() => removeClothesItem(it.id)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: 6,
-                                  border: "1px solid #ccc",
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: "#666",
-                                  whiteSpace: "nowrap",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </div>
                         </div>
+                        {/* 数据行 - 表格形式 */}
                         <div
                           style={{
-                            display: "flex",
-                            gap: 16,
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                            gap: 8,
                             color: "#666",
                             fontSize: 14,
-                            flexWrap: "wrap",
+                            padding: "4px 0",
                           }}
                         >
-                          {it.purchaseDate && (
-                            <div>
-                              购入时间：
-                              {(() => {
-                                try {
-                                  // Handle month format (YYYY-MM) or full date format
-                                  if (it.purchaseDate.match(/^\d{4}-\d{2}$/)) {
-                                    const [year, month] = it.purchaseDate.split("-");
-                                    return `${year}年${parseInt(month)}月`;
-                                  } else {
-                                    // Full date format - show year and month only
-                                    const date = new Date(it.purchaseDate);
-                                    return `${date.getFullYear()}年${date.getMonth() + 1}月`;
-                                  }
-                                } catch {
-                                  return it.purchaseDate;
+                          <div>
+                            {it.purchaseDate ? (() => {
+                              try {
+                                // Handle month format (YYYY-MM) or full date format
+                                if (it.purchaseDate.match(/^\d{4}-\d{2}$/)) {
+                                  const [year, month] = it.purchaseDate.split("-");
+                                  return `${year}年${parseInt(month)}月`;
+                                } else {
+                                  // Full date format - show year and month only
+                                  const date = new Date(it.purchaseDate);
+                                  return `${date.getFullYear()}年${date.getMonth() + 1}月`;
                                 }
-                              })()}
-                            </div>
-                          )}
-                          {it.purchaseDate && calculatePurchaseDuration(it.purchaseDate) && (
-                            <div>
-                              购入时长：{calculatePurchaseDuration(it.purchaseDate)}年
-                            </div>
-                          )}
-                          {it.price !== null && it.price !== undefined && (
-                            <div>价格：¥{Number(it.price).toFixed(2)}</div>
-                          )}
-                          {it.frequency && (
-                            <div>穿着频度：{it.frequency}</div>
-                          )}
-                          {it.color && (
-                            <div>颜色：{it.color}</div>
-                          )}
-                          {it.endReason && (
-                            <div>
-                              缘尽：{it.endReason}
-                              {it.endDate && (
-                                <>
-                                  {" "}
-                                  ({(() => {
-                                    try {
-                                      const date = new Date(it.endDate);
-                                      return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-                                    } catch {
-                                      return "";
-                                    }
-                                  })()})
-                                </>
-                              )}
-                            </div>
-                          )}
+                              } catch {
+                                return it.purchaseDate;
+                              }
+                            })() : "-"}
+                          </div>
+                          <div>
+                            {it.purchaseDate && calculatePurchaseDuration(it.purchaseDate)
+                              ? `${calculatePurchaseDuration(it.purchaseDate)}年`
+                              : "-"}
+                          </div>
+                          <div>
+                            {it.price !== null && it.price !== undefined
+                              ? `¥${Number(it.price).toFixed(2)}`
+                              : "-"}
+                          </div>
+                          <div>{it.season ? mapSeason(it.season) : "-"}</div>
+                          <div>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
+                          <div>{it.color || "-"}</div>
                         </div>
+                        {/* 缘尽信息单独显示 */}
+                        {it.endReason && (
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee", color: "#999", fontSize: 13 }}>
+                            缘尽：{it.endReason}
+                            {it.endDate && (
+                              <>
+                                {" "}
+                                ({(() => {
+                                  try {
+                                    const date = new Date(it.endDate);
+                                    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+                                  } catch {
+                                    return "";
+                                  }
+                                })()})
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* 全选和批量删除区域 - 固定在页面底部 */}
+              {sortedClothesItems.length > 0 && (
+                <div
+                  style={{
+                    position: "fixed",
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    padding: "12px",
+                    backgroundColor: "#f9f9f9",
+                    borderTop: "1px solid #e0e0e0",
+                    alignItems: "center",
+                    zIndex: 1000,
+                    boxShadow: "0 -2px 8px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      const allSelected = sortedClothesItems.length > 0 && 
+                        sortedClothesItems.every(item => selectedItemIds.has(item.id));
+                      if (allSelected) {
+                        // 如果已全选，则取消全选
+                        setSelectedItemIds(new Set());
+                        setSelectedItemId(null);
+                      } else {
+                        // 全选当前列表的所有条目
+                        setSelectedItemIds(new Set(sortedClothesItems.map(item => item.id)));
+                        setSelectedItemId(null); // 清空单选
+                      }
+                    }}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #0066cc",
+                      background: sortedClothesItems.length > 0 && 
+                        sortedClothesItems.every(item => selectedItemIds.has(item.id)) 
+                          ? "#0066cc" 
+                          : "#fff",
+                      color: sortedClothesItems.length > 0 && 
+                        sortedClothesItems.every(item => selectedItemIds.has(item.id)) 
+                          ? "#fff" 
+                          : "#0066cc",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {sortedClothesItems.length > 0 && 
+                      sortedClothesItems.every(item => selectedItemIds.has(item.id)) 
+                        ? "取消全选" 
+                        : "全选"}
+                  </button>
+                  {/* 单选模式：显示编辑、复制、删除、缘尽按钮 */}
+                  {selectedItemId && selectedItemIds.size === 0 && (() => {
+                    const selectedItem = sortedClothesItems.find(item => item.id === selectedItemId);
+                    if (!selectedItem) return null;
+                    return (
+                      <>
+                        <span style={{ fontSize: 14, color: "#666", marginLeft: 8 }}>
+                          已选中：{selectedItem.name}
+                        </span>
+                        <button
+                          onClick={() => {
+                            startEditClothesItem(selectedItem);
+                            // 编辑时不清除选中状态，保持高亮直到保存完成
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #0066cc",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#0066cc",
+                            fontWeight: 500,
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => {
+                            copyClothesItem(selectedItem);
+                            setSelectedItemId(null);
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #0066cc",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#0066cc",
+                            fontWeight: 500,
+                          }}
+                        >
+                          复制
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEndReasonItemId(selectedItemId);
+                            setSelectedItemId(null);
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #ff9800",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#ff9800",
+                            fontWeight: 500,
+                          }}
+                        >
+                          缘尽
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`确定要删除 "${selectedItem.name}" 吗？此操作不可撤销。`)) {
+                              removeClothesItem(selectedItemId);
+                              setSelectedItemId(null);
+                            }
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #dc3545",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#dc3545",
+                            fontWeight: 500,
+                          }}
+                        >
+                          删除
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedItemId(null);
+                            setSelectedItemIds(new Set());
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #999",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#666",
+                            fontWeight: 500,
+                            marginLeft: "auto",
+                          }}
+                        >
+                          取消选中
+                        </button>
+                      </>
+                    );
+                  })()}
+                  {/* 全选模式：只显示批量删除按钮 */}
+                  {selectedItemIds.size > 0 && (
+                    <>
+                      <span style={{ fontSize: 14, color: "#666", marginLeft: 8 }}>
+                        已选中 {selectedItemIds.size} 项
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`确定要删除选中的 ${selectedItemIds.size} 项吗？此操作不可撤销。`)) {
+                            selectedItemIds.forEach(id => {
+                              removeClothesItem(id);
+                            });
+                            setSelectedItemIds(new Set());
+                          }
+                        }}
+                        style={{
+                          padding: "8px 16px",
+                          borderRadius: 8,
+                          border: "1px solid #dc3545",
+                          background: "#fff",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          color: "#dc3545",
+                          fontWeight: 500,
+                          marginLeft: "auto",
+                        }}
+                      >
+                        批量删除 ({selectedItemIds.size})
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
           </div>
         ) : category === "daughterClothes" ? (
-          <div>
-            <h2 style={{ marginTop: 0 }}>我女儿的衣物</h2>
+          <div style={{ paddingBottom: sortedDaughterClothesItems.length > 0 ? "80px" : "0" }}>
+            <h2 style={{ marginTop: 0 }}>Skye的衣物</h2>
 
             {/* Filter Section */}
             <div
@@ -2277,6 +2699,42 @@ function App() {
               }}
             >
               <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>筛选：</span>
+              <select
+                value={filterYear}
+                onChange={(e) => setFilterYear(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  marginRight: 8,
+                }}
+              >
+                <option value="">全部年份</option>
+                {availableYears.map((year) => (
+                  <option key={year} value={year}>
+                    {year}年
+                  </option>
+                ))}
+              </select>
+              <select
+                value={filterSeason}
+                onChange={(e) => setFilterSeason(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  marginRight: 8,
+                }}
+              >
+                <option value="">全部季节</option>
+                {seasons.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
               <select
                 value={filterMainCategory}
                 onChange={(e) => {
@@ -2319,9 +2777,11 @@ function App() {
                 ))}
               </select>
 
-              {(filterMainCategory || filterSubCategory) && (
+              {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
                 <button
                   onClick={() => {
+                    setFilterYear("");
+                    setFilterSeason("");
                     setFilterMainCategory("");
                     setFilterSubCategory("");
                   }}
@@ -2340,7 +2800,7 @@ function App() {
             </div>
 
             {/* Filter Statistics */}
-            {(filterMainCategory || filterSubCategory) && (
+            {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
               <div
                 style={{
                   margin: "8px 0 12px 0",
@@ -2417,100 +2877,21 @@ function App() {
                 ))}
               </select>
 
-              <div style={{ position: "relative" }}>
-                <button
-                  type="button"
-                  onClick={() => setSeasonDropdownOpen(!seasonDropdownOpen)}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
-                    backgroundColor: "#fff",
-                    cursor: "pointer",
-                    minWidth: 120,
-                    textAlign: "left",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    fontSize: "inherit",
-                    fontWeight: "normal",
-                    fontFamily: "inherit",
-                    lineHeight: "normal",
-                    height: "auto",
-                  }}
-                >
-                  <span style={{ fontSize: "inherit", fontWeight: "normal" }}>{formatSeasonForDisplay(cSeason)}</span>
-                  <span style={{ marginLeft: 8, fontSize: "inherit", fontWeight: "normal" }}>{seasonDropdownOpen ? "▲" : "▼"}</span>
-                </button>
-                {seasonDropdownOpen && (
-                  <>
-                    <div
-                      style={{
-                        position: "fixed",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        zIndex: 100,
-                      }}
-                      onClick={() => setSeasonDropdownOpen(false)}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        left: 0,
-                        marginTop: 4,
-                        padding: 8,
-                        borderRadius: 8,
-                        border: "1px solid #ccc",
-                        backgroundColor: "#fff",
-                        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                        zIndex: 101,
-                        minWidth: 150,
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {seasons.map((s) => (
-                        <label
-                          key={s}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            cursor: "pointer",
-                            fontSize: 14,
-                            padding: "6px 8px",
-                            borderRadius: 4,
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = "#f5f5f5";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = "transparent";
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={cSeason.includes(s)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setCSeason([...cSeason, s]);
-                              } else {
-                                const newSeasons = cSeason.filter((season) => season !== s);
-                                // Ensure at least one season is selected
-                                setCSeason(newSeasons.length > 0 ? newSeasons : ["四季"]);
-                              }
-                            }}
-                            style={{ cursor: "pointer" }}
-                          />
-                          <span>{s}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
+              <select
+                value={cSeason}
+                onChange={(e) => setCSeason(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                }}
+              >
+                {seasons.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
 
               {(() => {
                 const currentDate = parsePurchaseDate(cPurchaseDate);
@@ -2627,8 +3008,9 @@ function App() {
                 style={{
                   padding: "8px 12px",
                   borderRadius: 10,
-                  border: "1px solid #ccc",
-                  background: "#fff",
+                  border: editingItemId ? "1px solid #ccc" : "1px solid #4CAF50",
+                  background: editingItemId ? "#fff" : "#4CAF50",
+                  color: editingItemId ? "#000" : "#fff",
                   cursor: "pointer",
                 }}
               >
@@ -2657,25 +3039,69 @@ function App() {
                 </p>
               ) : (
                 <div style={{ display: "grid", gap: 10 }}>
-                  {sortedDaughterClothesItems.map((it) => (
-                    <div
-                      key={it.id}
-                      style={{
-                        border: "1px solid #eee",
-                        borderRadius: 12,
-                        padding: 12,
-                        opacity: it.endReason ? 0.6 : 1,
-                        backgroundColor: it.endReason ? "#f5f5f5" : "transparent",
-                      }}
-                    >
-                      <div>
+                  {/* 表头 */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                      gap: 8,
+                      padding: "8px 12px",
+                      backgroundColor: "#f5f5f5",
+                      borderRadius: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#333",
+                      border: "1px solid #e0e0e0",
+                    }}
+                  >
+                    <div>购入时间</div>
+                    <div>购入时长</div>
+                    <div>价格</div>
+                    <div>季节</div>
+                    <div>穿着频度</div>
+                    <div>颜色</div>
+                  </div>
+                  {sortedDaughterClothesItems.map((it) => {
+                    const isSelected = selectedItemId === it.id || selectedItemIds.has(it.id) || editingItemId === it.id;
+                    return (
+                      <div
+                        key={it.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // 如果是全选模式，不处理单个点击
+                          if (selectedItemIds.size > 0 && !selectedItemIds.has(it.id)) {
+                            return; // 全选模式下，只允许通过全选按钮操作
+                          }
+                          // 单选模式
+                          if (selectedItemId === it.id) {
+                            setSelectedItemId(null);
+                            setSelectedItemIds(new Set());
+                          } else {
+                            setSelectedItemId(it.id);
+                            setSelectedItemIds(new Set());
+                          }
+                        }}
+                        style={{
+                          border: isSelected ? "2px solid #0066cc" : "1px solid #eee",
+                          borderRadius: 12,
+                          padding: 12,
+                          opacity: it.endReason ? 0.6 : 1,
+                          backgroundColor: isSelected 
+                            ? "#e6f2ff" 
+                            : it.endReason 
+                              ? "#f5f5f5" 
+                              : "transparent",
+                          cursor: "pointer",
+                          transition: "all 0.2s ease",
+                        }}
+                      >
                         <div
                           style={{
                             display: "flex",
                             justifyContent: "space-between",
                             gap: 12,
                             marginBottom: 8,
-                            alignItems: "flex-start",
+                            alignItems: "center",
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2706,150 +3132,265 @@ function App() {
                             )}
                             <div style={{ fontWeight: 700 }}>{it.name}</div>
                           </div>
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                            <div style={{ color: "#666", fontSize: 14 }}>
-                              <div>
-                                {it.mainCategory && it.subCategory
-                                  ? `${it.mainCategory} · ${it.subCategory}`
-                                  : it.type || "未分类"}
-                              </div>
-                              <div style={{ marginTop: 4, color: "#888" }}>
-                                {formatSeasonForDisplay(it.season)}
-                              </div>
-                            </div>
-                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                              <button
-                                onClick={() => startEditDaughterClothesItem(it)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: 6,
-                                  border: "1px solid #ccc",
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: "#666",
-                                  whiteSpace: "nowrap",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                编辑
-                              </button>
-                              <button
-                                onClick={() => copyDaughterClothesItem(it)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: 6,
-                                  border: "1px solid #ccc",
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: "#666",
-                                  whiteSpace: "nowrap",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                复制
-                              </button>
-                              <button
-                                onClick={() => setEndReasonItemId(it.id)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: 6,
-                                  border: "1px solid #ccc",
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: "#666",
-                                  whiteSpace: "nowrap",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                {it.endReason || "缘尽"}
-                              </button>
-                              <button
-                                onClick={() => removeDaughterClothesItem(it.id)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: 6,
-                                  border: "1px solid #ccc",
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                  fontSize: 12,
-                                  color: "#666",
-                                  whiteSpace: "nowrap",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </div>
                         </div>
+                        {/* 数据行 - 表格形式 */}
                         <div
                           style={{
-                            display: "flex",
-                            gap: 16,
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                            gap: 8,
                             color: "#666",
                             fontSize: 14,
-                            flexWrap: "wrap",
+                            padding: "4px 0",
                           }}
                         >
-                          {it.purchaseDate && (
-                            <div>
-                              购入时间：
-                              {(() => {
-                                try {
-                                  // Handle month format (YYYY-MM) or full date format
-                                  if (it.purchaseDate.match(/^\d{4}-\d{2}$/)) {
-                                    const [year, month] = it.purchaseDate.split("-");
-                                    return `${year}年${parseInt(month)}月`;
-                                  } else {
-                                    // Full date format - show year and month only
-                                    const date = new Date(it.purchaseDate);
-                                    return `${date.getFullYear()}年${date.getMonth() + 1}月`;
-                                  }
-                                } catch {
-                                  return it.purchaseDate;
+                          <div>
+                            {it.purchaseDate ? (() => {
+                              try {
+                                // Handle month format (YYYY-MM) or full date format
+                                if (it.purchaseDate.match(/^\d{4}-\d{2}$/)) {
+                                  const [year, month] = it.purchaseDate.split("-");
+                                  return `${year}年${parseInt(month)}月`;
+                                } else {
+                                  // Full date format - show year and month only
+                                  const date = new Date(it.purchaseDate);
+                                  return `${date.getFullYear()}年${date.getMonth() + 1}月`;
                                 }
-                              })()}
-                            </div>
-                          )}
-                          {it.purchaseDate && calculatePurchaseDuration(it.purchaseDate) && (
-                            <div>
-                              购入时长：{calculatePurchaseDuration(it.purchaseDate)}年
-                            </div>
-                          )}
-                          {it.price !== null && it.price !== undefined && (
-                            <div>价格：¥{Number(it.price).toFixed(2)}</div>
-                          )}
-                          {it.frequency && (
-                            <div>穿着频度：{it.frequency}</div>
-                          )}
-                          {it.color && (
-                            <div>颜色：{it.color}</div>
-                          )}
-                          {it.endReason && (
-                            <div>
-                              缘尽：{it.endReason}
-                              {it.endDate && (
-                                <>
-                                  {" "}
-                                  ({(() => {
-                                    try {
-                                      const date = new Date(it.endDate);
-                                      return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-                                    } catch {
-                                      return "";
-                                    }
-                                  })()})
-                                </>
-                              )}
-                            </div>
-                          )}
+                              } catch {
+                                return it.purchaseDate;
+                              }
+                            })() : "-"}
+                          </div>
+                          <div>
+                            {it.purchaseDate && calculatePurchaseDuration(it.purchaseDate)
+                              ? `${calculatePurchaseDuration(it.purchaseDate)}年`
+                              : "-"}
+                          </div>
+                          <div>
+                            {it.price !== null && it.price !== undefined
+                              ? `¥${Number(it.price).toFixed(2)}`
+                              : "-"}
+                          </div>
+                          <div>{it.season ? mapSeason(it.season) : "-"}</div>
+                          <div>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
+                          <div>{it.color || "-"}</div>
                         </div>
+                        {/* 缘尽信息单独显示 */}
+                        {it.endReason && (
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eee", color: "#999", fontSize: 13 }}>
+                            缘尽：{it.endReason}
+                            {it.endDate && (
+                              <>
+                                {" "}
+                                ({(() => {
+                                  try {
+                                    const date = new Date(it.endDate);
+                                    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+                                  } catch {
+                                    return "";
+                                  }
+                                })()})
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* 全选和批量删除区域 - 固定在页面底部 */}
+              {sortedDaughterClothesItems.length > 0 && (
+                <div
+                  style={{
+                    position: "fixed",
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    padding: "12px",
+                    backgroundColor: "#f9f9f9",
+                    borderTop: "1px solid #e0e0e0",
+                    alignItems: "center",
+                    zIndex: 1000,
+                    boxShadow: "0 -2px 8px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      const allSelected = sortedDaughterClothesItems.length > 0 && 
+                        sortedDaughterClothesItems.every(item => selectedItemIds.has(item.id));
+                      if (allSelected) {
+                        // 如果已全选，则取消全选
+                        setSelectedItemIds(new Set());
+                        setSelectedItemId(null);
+                      } else {
+                        // 全选当前列表的所有条目
+                        setSelectedItemIds(new Set(sortedDaughterClothesItems.map(item => item.id)));
+                        setSelectedItemId(null); // 清空单选
+                      }
+                    }}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #0066cc",
+                      background: sortedDaughterClothesItems.length > 0 && 
+                        sortedDaughterClothesItems.every(item => selectedItemIds.has(item.id)) 
+                          ? "#0066cc" 
+                          : "#fff",
+                      color: sortedDaughterClothesItems.length > 0 && 
+                        sortedDaughterClothesItems.every(item => selectedItemIds.has(item.id)) 
+                          ? "#fff" 
+                          : "#0066cc",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {sortedDaughterClothesItems.length > 0 && 
+                      sortedDaughterClothesItems.every(item => selectedItemIds.has(item.id)) 
+                        ? "取消全选" 
+                        : "全选"}
+                  </button>
+                  {/* 单选模式：显示编辑、复制、删除、缘尽按钮 */}
+                  {selectedItemId && selectedItemIds.size === 0 && (() => {
+                    const selectedItem = sortedDaughterClothesItems.find(item => item.id === selectedItemId);
+                    if (!selectedItem) return null;
+                    return (
+                      <>
+                        <span style={{ fontSize: 14, color: "#666", marginLeft: 8 }}>
+                          已选中：{selectedItem.name}
+                        </span>
+                        <button
+                          onClick={() => {
+                            startEditDaughterClothesItem(selectedItem);
+                            // 编辑时不清除选中状态，保持高亮直到保存完成
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #0066cc",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#0066cc",
+                            fontWeight: 500,
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => {
+                            copyDaughterClothesItem(selectedItem);
+                            setSelectedItemId(null);
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #0066cc",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#0066cc",
+                            fontWeight: 500,
+                          }}
+                        >
+                          复制
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEndReasonItemId(selectedItemId);
+                            setSelectedItemId(null);
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #ff9800",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#ff9800",
+                            fontWeight: 500,
+                          }}
+                        >
+                          缘尽
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`确定要删除 "${selectedItem.name}" 吗？此操作不可撤销。`)) {
+                              removeDaughterClothesItem(selectedItemId);
+                              setSelectedItemId(null);
+                            }
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #dc3545",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#dc3545",
+                            fontWeight: 500,
+                          }}
+                        >
+                          删除
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedItemId(null);
+                            setSelectedItemIds(new Set());
+                          }}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 8,
+                            border: "1px solid #999",
+                            background: "#fff",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            color: "#666",
+                            fontWeight: 500,
+                            marginLeft: "auto",
+                          }}
+                        >
+                          取消选中
+                        </button>
+                      </>
+                    );
+                  })()}
+                  {/* 全选模式：只显示批量删除按钮 */}
+                  {selectedItemIds.size > 0 && (
+                    <>
+                      <span style={{ fontSize: 14, color: "#666", marginLeft: 8 }}>
+                        已选中 {selectedItemIds.size} 项
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`确定要删除选中的 ${selectedItemIds.size} 项吗？此操作不可撤销。`)) {
+                            selectedItemIds.forEach(id => {
+                              removeDaughterClothesItem(id);
+                            });
+                            setSelectedItemIds(new Set());
+                          }
+                        }}
+                        style={{
+                          padding: "8px 16px",
+                          borderRadius: 8,
+                          border: "1px solid #dc3545",
+                          background: "#fff",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          color: "#dc3545",
+                          fontWeight: 500,
+                          marginLeft: "auto",
+                        }}
+                      >
+                        批量删除 ({selectedItemIds.size})
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -2863,6 +3404,7 @@ function App() {
           </div>
         )}
       </div>
+
 
       {/* End Reason Modal */}
       {endReasonItemId && (
