@@ -27,6 +27,8 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_APP_BASE: '/My-Stuff/'
       - run: touch dist/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
