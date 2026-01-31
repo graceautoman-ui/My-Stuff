@@ -836,8 +836,8 @@ function App() {
 
   const clothesCategories = useMemo(
     () => ({
-      上衣: ["T恤", "衬衫", "毛衣", "卫衣", "外套", "背心", "马甲", "打底衣", "其他"],
-      下装: ["长裤", "短裤", "半身裙", "打底裤", "其他"],
+      上衣: ["T恤", "衬衫", "毛衣", "卫衣", "风衣", "夹克", "羽绒服/棉服", "西装", "大衣", "背心", "马甲", "打底衣", "其他"],
+      下装: ["牛仔裤", "休闲裤", "西裤", "短裤", "半身裙", "打底裤", "其他"],
       连衣裙: ["长袖连衣裙", "短袖连衣裙", "无袖连衣裙", "吊带连衣裙", "其他"],
       内衣裤: ["内衣", "内裤", "袜子", "其他"],
       运动服: ["运动上衣", "运动裤", "运动套装", "其他"],
@@ -1006,12 +1006,18 @@ function App() {
       衬衫: "👔",
       毛衣: "🧶",
       卫衣: "🎽",
-      外套: "🧥",
+      风衣: "🧥",
+      夹克: "🧥",
+      "羽绒服/棉服": "🧥",
+      西装: "👔",
+      大衣: "🧥",
       背心: "🦺",
       马甲: "🎽",
       打底衣: "👕",
       // 下装
-      长裤: "👖",
+      牛仔裤: "👖",
+      休闲裤: "👖",
+      西裤: "👖",
       短裤: "🩳",
       半身裙: "👗",
       打底裤: "👖",
@@ -2290,7 +2296,7 @@ function App() {
             padding: "10px 14px",
             borderRadius: 8,
             border: "1px solid #ccc",
-            background: category === "clothes" ? "#eee" : "white",
+            background: category === "clothes" ? "#f0f7ff" : "white",
             cursor: "pointer",
             fontSize: "clamp(13px, 3.5vw, 15px)",
             flex: "1",
@@ -2310,7 +2316,7 @@ function App() {
             padding: "10px 14px",
             borderRadius: 8,
             border: "1px solid #ccc",
-            background: category === "daughterClothes" ? "#eee" : "white",
+            background: category === "daughterClothes" ? "#f0f7ff" : "white",
             cursor: "pointer",
             fontSize: "clamp(13px, 3.5vw, 15px)",
             flex: "1",
@@ -2330,7 +2336,7 @@ function App() {
             padding: "10px 14px",
             borderRadius: 8,
             border: "1px solid #ccc",
-            background: category === "stats" ? "#eee" : "white",
+            background: category === "stats" ? "#f0f7ff" : "white",
             cursor: "pointer",
             fontSize: "clamp(13px, 3.5vw, 15px)",
             flex: "1",
@@ -2565,26 +2571,12 @@ function App() {
                 alignItems: "center",
                 margin: "12px 0",
                 padding: "12px",
-                backgroundColor: "#f9f9f9",
+                backgroundColor: "#f0f7ff",
                 borderRadius: 10,
-                border: "1px solid #e0e0e0",
+                border: "1px solid #d0e7ff",
               }}
             >
               <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>筛选：</span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="按名称搜索"
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                  fontSize: 14,
-                  minWidth: 120,
-                  marginRight: 8,
-                }}
-              />
               <select
                 value={filterYear}
                 onChange={(e) => setFilterYear(e.target.value)}
@@ -2662,6 +2654,21 @@ function App() {
                   </option>
                 ))}
               </select>
+
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="按名称搜索"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  minWidth: 120,
+                  marginRight: 8,
+                }}
+              />
 
               {(filterYear || filterSeason || filterMainCategory || filterSubCategory || searchQuery.trim()) && (
                 <button
@@ -3276,26 +3283,12 @@ function App() {
                 alignItems: "center",
                 margin: "12px 0",
                 padding: "12px",
-                backgroundColor: "#f9f9f9",
+                backgroundColor: "#f0f7ff",
                 borderRadius: 10,
-                border: "1px solid #e0e0e0",
+                border: "1px solid #d0e7ff",
               }}
             >
               <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>筛选：</span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="按名称搜索"
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                  fontSize: 14,
-                  minWidth: 120,
-                  marginRight: 8,
-                }}
-              />
               <select
                 value={filterYear}
                 onChange={(e) => setFilterYear(e.target.value)}
@@ -3373,6 +3366,21 @@ function App() {
                   </option>
                 ))}
               </select>
+
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="按名称搜索"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  minWidth: 120,
+                  marginRight: 8,
+                }}
+              />
 
               {(filterYear || filterSeason || filterMainCategory || filterSubCategory || searchQuery.trim()) && (
                 <button

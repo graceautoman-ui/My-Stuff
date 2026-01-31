@@ -102,7 +102,7 @@ export function localToDbItem(localItem, userId) {
     if (mainCategory === '上衣') {
       subCategory = 'T恤';
     } else if (mainCategory === '下装') {
-      subCategory = '长裤';
+      subCategory = '牛仔裤';
     } else if (mainCategory === '连衣裙') {
       subCategory = '长袖连衣裙';
     } else if (mainCategory === '内衣裤') {
@@ -212,7 +212,7 @@ export function dbToLocalItem(dbItem) {
     if (mainCategory === '上衣') {
       subCategory = 'T恤';
     } else if (mainCategory === '下装') {
-      subCategory = '长裤';
+      subCategory = '牛仔裤';
     } else if (mainCategory === '外套') {
       subCategory = '大衣';
     } else if (mainCategory === '鞋') {
@@ -317,7 +317,7 @@ export function mergeItems(localItems, remoteItems) {
             if (mainCategory === '上衣') {
               mergedSubCategory = 'T恤';
             } else if (mainCategory === '下装') {
-              mergedSubCategory = '长裤';
+              mergedSubCategory = '牛仔裤';
             } else if (mainCategory === '外套') {
               mergedSubCategory = '大衣';
             } else if (mainCategory === '鞋') {
