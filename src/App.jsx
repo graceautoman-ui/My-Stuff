@@ -961,10 +961,10 @@ function App() {
   );
 
   // Section 2d-4-1: End Reason Options
-  // Options for ending reason: 丢弃, 出售, 送人.
+  // Options for ending reason: 丢弃, 出售, 送人, 退货.
 
   const endReasons = useMemo(
-    () => ["丢弃", "出售", "送人"],
+    () => ["丢弃", "出售", "送人", "退货"],
     []
   );
 
@@ -1568,7 +1568,35 @@ function App() {
     setCPrice("");
     setCFrequency("偶尔");
     setCColor("黑色");
+    setSelectedItemId(null);
+    setSelectedItemIds(new Set());
   }
+
+  // 单选时自动回填编辑框；取消选中时清空编辑框
+  useEffect(() => {
+    if (selectedItemIds.size > 0) return;
+    if (selectedItemId == null) {
+      setEditingItemId(null);
+      setCName("");
+      setCMainCategory("上衣");
+      setCSubCategory("T恤");
+      setCSeason("四季");
+      setCPurchaseDate("");
+      setCPrice("");
+      setCFrequency("偶尔");
+      setCColor("黑色");
+      return;
+    }
+    const item = clothesItems.find((i) => i.id === selectedItemId);
+    if (item) {
+      startEditClothesItem(item);
+      return;
+    }
+    const daughterItem = daughterClothesItems.find((i) => i.id === selectedItemId);
+    if (daughterItem) {
+      startEditDaughterClothesItem(daughterItem);
+    }
+  }, [selectedItemId, selectedItemIds.size]);
 
   // Section 2g-3-1: Copy Clothes Item Handler
   // Copies an item's data into the form for creating a new item (e.g., same item in different color).
@@ -2207,6 +2235,19 @@ function App() {
       >
         {category === "clothes" ? (
           <div style={{ paddingBottom: sortedClothesItems.length > 0 ? "80px" : "0" }}>
+            {/* 固定：标题 + 筛选 + 编辑栏 */}
+            <div
+              style={{
+                position: "sticky",
+                top: 0,
+                zIndex: 10,
+                backgroundColor: "#fff",
+                paddingBottom: 12,
+                marginBottom: 0,
+                borderBottom: "1px solid #eee",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              }}
+            >
             <h2 style={{ marginTop: 0 }}>Grace的衣物</h2>
 
             {/* Filter Section */}
@@ -2324,30 +2365,28 @@ function App() {
               )}
             </div>
 
-            {/* Filter Statistics */}
-            {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
-              <div
-                style={{
-                  margin: "8px 0 12px 0",
-                  padding: "8px 12px",
-                  backgroundColor: "#f0f7ff",
-                  borderRadius: 8,
-                  border: "1px solid #d0e7ff",
-                  fontSize: 14,
-                  color: "#333",
-                }}
-              >
-                <span style={{ fontWeight: 500 }}>筛选统计：</span>
-                <span style={{ marginLeft: 12 }}>
-                  共 {clothesFilterStats.count} 件
+            {/* Filter Statistics：始终展示（无筛选时为整体统计，有筛选时为筛选后统计） */}
+            <div
+              style={{
+                margin: "8px 0 12px 0",
+                padding: "8px 12px",
+                backgroundColor: "#f0f7ff",
+                borderRadius: 8,
+                border: "1px solid #d0e7ff",
+                fontSize: 14,
+                color: "#333",
+              }}
+            >
+              <span style={{ fontWeight: 500 }}>筛选统计：</span>
+              <span style={{ marginLeft: 12 }}>
+                共 {clothesFilterStats.count} 件
+              </span>
+              {clothesFilterStats.totalPrice > 0 && (
+                <span style={{ marginLeft: 16, color: "#0066cc" }}>
+                  总金额：¥{clothesFilterStats.totalPrice.toFixed(2)}
                 </span>
-                {clothesFilterStats.totalPrice > 0 && (
-                  <span style={{ marginLeft: 16, color: "#0066cc" }}>
-                    总金额：¥{clothesFilterStats.totalPrice.toFixed(2)}
-                  </span>
-                )}
-              </div>
-            )}
+              )}
+            </div>
 
             <div
               style={{
@@ -2556,6 +2595,7 @@ function App() {
                 </button>
               )}
             </div>
+            </div>
 
             <div style={{ marginTop: 12 }}>
               {sortedClothesItems.length === 0 ? (
@@ -2563,7 +2603,15 @@ function App() {
                   还没有衣物记录。先录入 3–5 件常穿的。
                 </p>
               ) : (
-                <div style={{ display: "grid", gap: 10 }}>
+                <div
+                  style={{ display: "grid", gap: 10 }}
+                  onClick={(e) => {
+                    if (selectedItemId && selectedItemIds.size === 0 && !e.target.closest("[data-item-id]")) {
+                      setSelectedItemId(null);
+                      setSelectedItemIds(new Set());
+                    }
+                  }}
+                >
                   {/* 表头 */}
                   <div
                     style={{
@@ -2591,6 +2639,7 @@ function App() {
                     return (
                       <div
                         key={it.id}
+                        data-item-id={it.id}
                         onClick={(e) => {
                           e.stopPropagation();
                           // 如果是全选模式，不处理单个点击
@@ -2780,7 +2829,7 @@ function App() {
                         ? "取消全选" 
                         : "全选"}
                   </button>
-                  {/* 单选模式：显示编辑、复制、删除、缘尽按钮 */}
+                  {/* 单选模式：显示复制、缘尽、删除按钮（选中后编辑框已自动回填，点保存即更新） */}
                   {selectedItemId && selectedItemIds.size === 0 && (() => {
                     const selectedItem = sortedClothesItems.find(item => item.id === selectedItemId);
                     if (!selectedItem) return null;
@@ -2789,24 +2838,6 @@ function App() {
                         <span style={{ fontSize: 14, color: "#666", marginLeft: 8 }}>
                           已选中：{selectedItem.name}
                         </span>
-                        <button
-                          onClick={() => {
-                            startEditClothesItem(selectedItem);
-                            // 编辑时不清除选中状态，保持高亮直到保存完成
-                          }}
-                          style={{
-                            padding: "8px 16px",
-                            borderRadius: 8,
-                            border: "1px solid #0066cc",
-                            background: "#fff",
-                            cursor: "pointer",
-                            fontSize: 14,
-                            color: "#0066cc",
-                            fontWeight: 500,
-                          }}
-                        >
-                          编辑
-                        </button>
                         <button
                           onClick={() => {
                             copyClothesItem(selectedItem);
@@ -2863,25 +2894,6 @@ function App() {
                         >
                           删除
                         </button>
-                        <button
-                          onClick={() => {
-                            setSelectedItemId(null);
-                            setSelectedItemIds(new Set());
-                          }}
-                          style={{
-                            padding: "8px 16px",
-                            borderRadius: 8,
-                            border: "1px solid #999",
-                            background: "#fff",
-                            cursor: "pointer",
-                            fontSize: 14,
-                            color: "#666",
-                            fontWeight: 500,
-                            marginLeft: "auto",
-                          }}
-                        >
-                          取消选中
-                        </button>
                       </>
                     );
                   })()}
@@ -2922,6 +2934,19 @@ function App() {
           </div>
         ) : category === "daughterClothes" ? (
           <div style={{ paddingBottom: sortedDaughterClothesItems.length > 0 ? "80px" : "0" }}>
+            {/* 固定：标题 + 筛选 + 编辑栏 */}
+            <div
+              style={{
+                position: "sticky",
+                top: 0,
+                zIndex: 10,
+                backgroundColor: "#fff",
+                paddingBottom: 12,
+                marginBottom: 0,
+                borderBottom: "1px solid #eee",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              }}
+            >
             <h2 style={{ marginTop: 0 }}>Skye的衣物</h2>
 
             {/* Filter Section */}
@@ -3039,30 +3064,28 @@ function App() {
               )}
             </div>
 
-            {/* Filter Statistics */}
-            {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
-              <div
-                style={{
-                  margin: "8px 0 12px 0",
-                  padding: "8px 12px",
-                  backgroundColor: "#f0f7ff",
-                  borderRadius: 8,
-                  border: "1px solid #d0e7ff",
-                  fontSize: 14,
-                  color: "#333",
-                }}
-              >
-                <span style={{ fontWeight: 500 }}>筛选统计：</span>
-                <span style={{ marginLeft: 12 }}>
-                  共 {daughterClothesFilterStats.count} 件
+            {/* Filter Statistics：始终展示（无筛选时为整体统计，有筛选时为筛选后统计） */}
+            <div
+              style={{
+                margin: "8px 0 12px 0",
+                padding: "8px 12px",
+                backgroundColor: "#f0f7ff",
+                borderRadius: 8,
+                border: "1px solid #d0e7ff",
+                fontSize: 14,
+                color: "#333",
+              }}
+            >
+              <span style={{ fontWeight: 500 }}>筛选统计：</span>
+              <span style={{ marginLeft: 12 }}>
+                共 {daughterClothesFilterStats.count} 件
+              </span>
+              {daughterClothesFilterStats.totalPrice > 0 && (
+                <span style={{ marginLeft: 16, color: "#0066cc" }}>
+                  总金额：¥{daughterClothesFilterStats.totalPrice.toFixed(2)}
                 </span>
-                {daughterClothesFilterStats.totalPrice > 0 && (
-                  <span style={{ marginLeft: 16, color: "#0066cc" }}>
-                    总金额：¥{daughterClothesFilterStats.totalPrice.toFixed(2)}
-                  </span>
-                )}
-              </div>
-            )}
+              )}
+            </div>
 
             <div
               style={{
@@ -3271,6 +3294,7 @@ function App() {
                 </button>
               )}
             </div>
+            </div>
 
             <div style={{ marginTop: 12 }}>
               {sortedDaughterClothesItems.length === 0 ? (
@@ -3278,7 +3302,15 @@ function App() {
                   还没有衣物记录。先录入 3–5 件常穿的。
                 </p>
               ) : (
-                <div style={{ display: "grid", gap: 10 }}>
+                <div
+                  style={{ display: "grid", gap: 10 }}
+                  onClick={(e) => {
+                    if (selectedItemId && selectedItemIds.size === 0 && !e.target.closest("[data-item-id]")) {
+                      setSelectedItemId(null);
+                      setSelectedItemIds(new Set());
+                    }
+                  }}
+                >
                   {/* 表头 */}
                   <div
                     style={{
@@ -3306,6 +3338,7 @@ function App() {
                     return (
                       <div
                         key={it.id}
+                        data-item-id={it.id}
                         onClick={(e) => {
                           e.stopPropagation();
                           // 如果是全选模式，不处理单个点击
@@ -3495,7 +3528,7 @@ function App() {
                         ? "取消全选" 
                         : "全选"}
                   </button>
-                  {/* 单选模式：显示编辑、复制、删除、缘尽按钮 */}
+                  {/* 单选模式：显示复制、缘尽、删除按钮（选中后编辑框已自动回填，点保存即更新） */}
                   {selectedItemId && selectedItemIds.size === 0 && (() => {
                     const selectedItem = sortedDaughterClothesItems.find(item => item.id === selectedItemId);
                     if (!selectedItem) return null;
@@ -3504,24 +3537,6 @@ function App() {
                         <span style={{ fontSize: 14, color: "#666", marginLeft: 8 }}>
                           已选中：{selectedItem.name}
                         </span>
-                        <button
-                          onClick={() => {
-                            startEditDaughterClothesItem(selectedItem);
-                            // 编辑时不清除选中状态，保持高亮直到保存完成
-                          }}
-                          style={{
-                            padding: "8px 16px",
-                            borderRadius: 8,
-                            border: "1px solid #0066cc",
-                            background: "#fff",
-                            cursor: "pointer",
-                            fontSize: 14,
-                            color: "#0066cc",
-                            fontWeight: 500,
-                          }}
-                        >
-                          编辑
-                        </button>
                         <button
                           onClick={() => {
                             copyDaughterClothesItem(selectedItem);
@@ -3577,25 +3592,6 @@ function App() {
                           }}
                         >
                           删除
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSelectedItemId(null);
-                            setSelectedItemIds(new Set());
-                          }}
-                          style={{
-                            padding: "8px 16px",
-                            borderRadius: 8,
-                            border: "1px solid #999",
-                            background: "#fff",
-                            cursor: "pointer",
-                            fontSize: 14,
-                            color: "#666",
-                            fontWeight: 500,
-                            marginLeft: "auto",
-                          }}
-                        >
-                          取消选中
                         </button>
                       </>
                     );
