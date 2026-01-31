@@ -700,6 +700,9 @@ function App() {
             "驼色": "#D2B48C",
             "军绿色": "#4B5320",
             "藏青色": "#1E3A5F",
+            "条纹": "#6B6B6B",
+            "小碎花": "#E8B4B8",
+            "鲜艳花": "#E91E63",
             "其他": "#CCCCCC",
           };
           colorHex = colorMap[colorName] || '#000000';
@@ -762,6 +765,9 @@ function App() {
             "驼色": "#D2B48C",
             "军绿色": "#4B5320",
             "藏青色": "#1E3A5F",
+            "条纹": "#6B6B6B",
+            "小碎花": "#E8B4B8",
+            "鲜艳花": "#E91E63",
             "其他": "#CCCCCC",
           };
           colorHex = colorMap[colorName] || '#000000';
@@ -794,7 +800,7 @@ function App() {
 
   const [cName, setCName] = useState("");
   const [cMainCategory, setCMainCategory] = useState("上衣");
-  const [cSubCategory, setCSubCategory] = useState("T恤");
+  const [cSubCategory, setCSubCategory] = useState("T恤短袖");
   const [cSeason, setCSeason] = useState("四季"); // String for single-select
   const [cPurchaseDate, setCPurchaseDate] = useState("");
   const [cPrice, setCPrice] = useState("");
@@ -821,7 +827,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState(""); // 按名称模糊搜索
 
   // 排序状态
-  const [sortField, setSortField] = useState(null); // null | 'purchaseDate' | 'purchaseDuration' | 'price' | 'season' | 'frequency' | 'color'
+  const [sortField, setSortField] = useState(null); // null | 'purchaseDate' | 'purchaseDuration' | 'price' | 'season' | 'frequency' | 'color' | 'updatedAt'
   const [sortDirection, setSortDirection] = useState("asc"); // 'asc' | 'desc'
 
   // Section 2c-5: Selected Item State
@@ -836,7 +842,7 @@ function App() {
 
   const clothesCategories = useMemo(
     () => ({
-      上衣: ["T恤", "衬衫", "毛衣", "卫衣", "风衣", "夹克", "羽绒服/棉服", "西装", "大衣", "背心", "马甲", "打底衣", "其他"],
+      上衣: ["T恤长袖", "T恤短袖", "衬衫", "毛衣", "卫衣", "风衣", "夹克", "羽绒服/棉服", "西装", "大衣", "背心", "马甲", "打底衣", "其他"],
       下装: ["牛仔裤", "休闲裤", "西裤", "短裤", "半身裙", "打底裤", "其他"],
       连衣裙: ["长袖连衣裙", "短袖连衣裙", "无袖连衣裙", "吊带连衣裙", "其他"],
       内衣裤: ["内衣", "内裤", "袜子", "其他"],
@@ -991,6 +997,9 @@ function App() {
       { name: "驼色", hex: "#D2B48C" },
       { name: "军绿色", hex: "#4B5320" },
       { name: "藏青色", hex: "#1E3A5F" },
+      { name: "条纹", hex: "#6B6B6B" },
+      { name: "小碎花", hex: "#E8B4B8" },
+      { name: "鲜艳花", hex: "#E91E63" },
       { name: "其他", hex: "#CCCCCC" },
     ],
     []
@@ -1002,7 +1011,8 @@ function App() {
   const subCategoryIcons = useMemo(
     () => ({
       // 上衣
-      "T恤": "👕",
+      "T恤长袖": "👕",
+      "T恤短袖": "👕",
       衬衫: "👔",
       毛衣: "🧶",
       卫衣: "🎽",
@@ -1250,6 +1260,11 @@ function App() {
           vb = b.color || "";
           return dir * (va.localeCompare(vb) || 0);
         }
+        if (sortField === "updatedAt") {
+          va = a.updatedAt || a.createdAt || "";
+          vb = b.updatedAt || b.createdAt || "";
+          return dir * (va.localeCompare(vb) || 0);
+        }
         return 0;
       });
     }
@@ -1336,6 +1351,11 @@ function App() {
           vb = b.color || "";
           return dir * (va.localeCompare(vb) || 0);
         }
+        if (sortField === "updatedAt") {
+          va = a.updatedAt || a.createdAt || "";
+          vb = b.updatedAt || b.createdAt || "";
+          return dir * (va.localeCompare(vb) || 0);
+        }
         return 0;
       });
     }
@@ -1366,19 +1386,30 @@ function App() {
     return { count, totalPrice };
   }, [sortedDaughterClothesItems]);
 
-  // 数据统计页：数据源与维度选择
+  // 数据统计页：数据源、年份筛选、维度选择
   const [statsSource, setStatsSource] = useState("clothes"); // "clothes" | "daughterClothes"
-  const [statsDimension, setStatsDimension] = useState("mainCategory"); // "mainCategory" | "season" | "frequency" | "year" | "subCategory"
+  const [statsYear, setStatsYear] = useState(""); // "" 表示全部年份，"YYYY" 表示具体年份
+  const [statsDimension, setStatsDimension] = useState("mainCategory"); // "mainCategory" | "season" | "frequency" | "subCategory"
   const [statsMainCategory, setStatsMainCategory] = useState("上衣"); // 用于小类维度时选择主分类
 
-  // 统计数据结构：每个维度下 { 维度值: { count, amount } }
-  const statsForClothes = useMemo(() => {
-    const items = clothesItems.filter((i) => !i.endReason);
+  // 获取可用年份列表（用于年份筛选下拉框）
+  const statsAvailableYears = useMemo(() => {
+    const items = statsSource === "clothes" ? clothesItems : daughterClothesItems;
+    const years = new Set();
+    items.filter((i) => !i.endReason).forEach((i) => {
+      if (i.purchaseDate) {
+        years.add(i.purchaseDate.substring(0, 4));
+      }
+    });
+    return Array.from(years).sort();
+  }, [statsSource, clothesItems, daughterClothesItems]);
+
+  // 辅助函数：计算一组 items 的各维度统计
+  const computeDimensionStats = (items) => {
     const totalPrice = items.reduce((s, i) => s + (i.price != null ? Number(i.price) : 0), 0);
     const byMain = {};
     const bySeason = {};
     const byFreq = {};
-    const byYear = {};
     const bySubCategory = {}; // { 主分类: { 小类: { count, amount } } }
     items.forEach((i) => {
       const price = i.price != null ? Number(i.price) : 0;
@@ -1394,11 +1425,6 @@ function App() {
       if (!byFreq[freq]) byFreq[freq] = { count: 0, amount: 0 };
       byFreq[freq].count += 1;
       byFreq[freq].amount += price;
-      // 按年份统计
-      const year = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
-      if (!byYear[year]) byYear[year] = { count: 0, amount: 0 };
-      byYear[year].count += 1;
-      byYear[year].amount += price;
       // 按小类统计（按主分类分组）
       const sub = i.subCategory || "其他";
       if (!bySubCategory[main]) bySubCategory[main] = {};
@@ -1406,80 +1432,168 @@ function App() {
       bySubCategory[main][sub].count += 1;
       bySubCategory[main][sub].amount += price;
     });
-    return { count: items.length, totalPrice, byMainCategory: byMain, bySeason, byFrequency: byFreq, byYear, bySubCategory };
+    return { count: items.length, totalPrice, byMainCategory: byMain, bySeason, byFrequency: byFreq, bySubCategory };
+  };
+
+  // 统计数据结构：包含总体统计和按年份分组的统计
+  const statsForClothes = useMemo(() => {
+    const allItems = clothesItems.filter((i) => !i.endReason);
+    // 总体统计
+    const overall = computeDimensionStats(allItems);
+    // 按年份分组统计
+    const byYear = {};
+    allItems.forEach((i) => {
+      const year = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
+      if (!byYear[year]) byYear[year] = [];
+      byYear[year].push(i);
+    });
+    const byYearStats = {};
+    Object.entries(byYear).forEach(([year, items]) => {
+      byYearStats[year] = computeDimensionStats(items);
+    });
+    return { ...overall, byYearStats };
   }, [clothesItems]);
 
   const statsForDaughter = useMemo(() => {
-    const items = daughterClothesItems.filter((i) => !i.endReason);
-    const totalPrice = items.reduce((s, i) => s + (i.price != null ? Number(i.price) : 0), 0);
-    const byMain = {};
-    const bySeason = {};
-    const byFreq = {};
+    const allItems = daughterClothesItems.filter((i) => !i.endReason);
+    // 总体统计
+    const overall = computeDimensionStats(allItems);
+    // 按年份分组统计
     const byYear = {};
-    const bySubCategory = {}; // { 主分类: { 小类: { count, amount } } }
-    items.forEach((i) => {
-      const price = i.price != null ? Number(i.price) : 0;
-      const main = i.mainCategory || "其他";
-      if (!byMain[main]) byMain[main] = { count: 0, amount: 0 };
-      byMain[main].count += 1;
-      byMain[main].amount += price;
-      const season = mapSeason(i.season) || "其他";
-      if (!bySeason[season]) bySeason[season] = { count: 0, amount: 0 };
-      bySeason[season].count += 1;
-      bySeason[season].amount += price;
-      const freq = mapFrequency(i.frequency) || "其他";
-      if (!byFreq[freq]) byFreq[freq] = { count: 0, amount: 0 };
-      byFreq[freq].count += 1;
-      byFreq[freq].amount += price;
-      // 按年份统计
+    allItems.forEach((i) => {
       const year = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
-      if (!byYear[year]) byYear[year] = { count: 0, amount: 0 };
-      byYear[year].count += 1;
-      byYear[year].amount += price;
-      // 按小类统计（按主分类分组）
-      const sub = i.subCategory || "其他";
-      if (!bySubCategory[main]) bySubCategory[main] = {};
-      if (!bySubCategory[main][sub]) bySubCategory[main][sub] = { count: 0, amount: 0 };
-      bySubCategory[main][sub].count += 1;
-      bySubCategory[main][sub].amount += price;
+      if (!byYear[year]) byYear[year] = [];
+      byYear[year].push(i);
     });
-    return { count: items.length, totalPrice, byMainCategory: byMain, bySeason, byFrequency: byFreq, byYear, bySubCategory };
+    const byYearStats = {};
+    Object.entries(byYear).forEach(([year, items]) => {
+      byYearStats[year] = computeDimensionStats(items);
+    });
+    return { ...overall, byYearStats };
   }, [daughterClothesItems]);
 
-  const currentStats = statsSource === "clothes" ? statsForClothes : statsForDaughter;
+  const allStats = statsSource === "clothes" ? statsForClothes : statsForDaughter;
+  // 当选择具体年份时，使用该年份的统计；否则使用总体统计（用于汇总卡片）
+  const currentStats = statsYear ? (allStats.byYearStats?.[statsYear] || { count: 0, totalPrice: 0, byMainCategory: {}, bySeason: {}, byFrequency: {}, bySubCategory: {} }) : allStats;
+  
   const dimensionLabel = useMemo(() => {
     if (statsDimension === "mainCategory") return "主分类";
     if (statsDimension === "season") return "季节";
     if (statsDimension === "frequency") return "穿着频度";
-    if (statsDimension === "year") return "年份";
     if (statsDimension === "subCategory") return `小类（${statsMainCategory}）`;
     return "";
   }, [statsDimension, statsMainCategory]);
-  const dimensionData = useMemo(() => {
+
+  // 辅助函数：从统计对象中提取指定维度的数据数组
+  const extractDimensionData = (stats, dimension, mainCat) => {
     let map;
-    if (statsDimension === "mainCategory") {
-      map = currentStats.byMainCategory;
-    } else if (statsDimension === "season") {
-      map = currentStats.bySeason;
-    } else if (statsDimension === "frequency") {
-      map = currentStats.byFrequency;
-    } else if (statsDimension === "year") {
-      map = currentStats.byYear;
-    } else if (statsDimension === "subCategory") {
-      map = currentStats.bySubCategory?.[statsMainCategory] || {};
+    if (dimension === "mainCategory") {
+      map = stats.byMainCategory;
+    } else if (dimension === "season") {
+      map = stats.bySeason;
+    } else if (dimension === "frequency") {
+      map = stats.byFrequency;
+    } else if (dimension === "subCategory") {
+      map = stats.bySubCategory?.[mainCat] || {};
     } else {
       map = {};
     }
     if (!map || typeof map !== "object") return [];
-    const arr = Object.entries(map)
+    return Object.entries(map)
       .map(([name, v]) => ({ name, count: v.count, amount: v.amount }))
       .sort((a, b) => b.count - a.count);
-    // 年份按时间顺序排序
-    if (statsDimension === "year") {
-      arr.sort((a, b) => a.name.localeCompare(b.name));
-    }
-    return arr;
+  };
+
+  // 当选择具体年份时的维度数据
+  const dimensionData = useMemo(() => {
+    return extractDimensionData(currentStats, statsDimension, statsMainCategory);
   }, [currentStats, statsDimension, statsMainCategory]);
+
+  // 当不选择年份时，生成跨年份对比数据结构
+  // { years: ["2024", "2023", ...], dimensionValues: ["上衣", ...], dataMap: { "上衣": { "2024": {count, amount}, ... } }, yearStats: { "2024": {count, totalPrice}, ... } }
+  const crossYearComparisonData = useMemo(() => {
+    if (statsYear) return null; // 选择了具体年份时不需要
+    const years = Object.keys(allStats.byYearStats || {}).sort().reverse(); // 按年份倒序
+    if (years.length === 0) return null;
+    
+    // 收集所有维度值
+    const dimensionValuesSet = new Set();
+    years.forEach((year) => {
+      const yearData = extractDimensionData(allStats.byYearStats[year], statsDimension, statsMainCategory);
+      yearData.forEach(({ name }) => dimensionValuesSet.add(name));
+    });
+    const dimensionValues = Array.from(dimensionValuesSet);
+    
+    // 构建数据映射 { 维度值: { 年份: { count, amount } } }
+    const dataMap = {};
+    dimensionValues.forEach((dimVal) => {
+      dataMap[dimVal] = {};
+      years.forEach((year) => {
+        dataMap[dimVal][year] = { count: 0, amount: 0 };
+      });
+    });
+    years.forEach((year) => {
+      const yearData = extractDimensionData(allStats.byYearStats[year], statsDimension, statsMainCategory);
+      yearData.forEach(({ name, count, amount }) => {
+        if (dataMap[name]) {
+          dataMap[name][year] = { count, amount };
+        }
+      });
+    });
+    
+    // 按总数量排序维度值
+    dimensionValues.sort((a, b) => {
+      const totalA = years.reduce((sum, y) => sum + (dataMap[a][y]?.count || 0), 0);
+      const totalB = years.reduce((sum, y) => sum + (dataMap[b][y]?.count || 0), 0);
+      return totalB - totalA;
+    });
+    
+    // 年份统计（当选择小类维度时，只统计选中主分类的数据）
+    const yearStats = {};
+    if (statsDimension === "subCategory") {
+      // 小类维度：按主分类筛选后计算年份统计
+      years.forEach((year) => {
+        const yearDimData = extractDimensionData(allStats.byYearStats[year], statsDimension, statsMainCategory);
+        const count = yearDimData.reduce((sum, d) => sum + d.count, 0);
+        const totalPrice = yearDimData.reduce((sum, d) => sum + d.amount, 0);
+        yearStats[year] = { count, totalPrice };
+      });
+    } else {
+      years.forEach((year) => {
+        yearStats[year] = allStats.byYearStats[year];
+      });
+    }
+    
+    // 计算各年份最大件数（用于条形图宽度）
+    const maxCountPerYear = {};
+    years.forEach((year) => {
+      maxCountPerYear[year] = Math.max(...dimensionValues.map((dv) => dataMap[dv][year]?.count || 0), 1);
+    });
+    
+    return { years, dimensionValues, dataMap, yearStats, maxCountPerYear };
+  }, [allStats, statsYear, statsDimension, statsMainCategory]);
+
+  // 计算显示用的统计数据（当选择小类维度时，只统计选中主分类的数据）
+  const displayStats = useMemo(() => {
+    // 当选择小类维度时，只统计选中主分类的数据
+    if (statsDimension === "subCategory") {
+      const items = statsSource === "clothes" ? clothesItems : daughterClothesItems;
+      let filtered = items.filter((i) => !i.endReason && i.mainCategory === statsMainCategory);
+      // 如果选择了具体年份，进一步筛选
+      if (statsYear) {
+        filtered = filtered.filter((i) => i.purchaseDate && i.purchaseDate.substring(0, 4) === statsYear);
+      }
+      const count = filtered.length;
+      const totalPrice = filtered.reduce((s, i) => s + (i.price != null ? Number(i.price) : 0), 0);
+      return { count, totalPrice, label: `${statsMainCategory}${statsYear ? `·${statsYear}年` : ""}` };
+    }
+    // 其他维度使用 currentStats
+    return { 
+      count: currentStats.count, 
+      totalPrice: currentStats.totalPrice, 
+      label: statsYear ? `${statsYear}年` : "全部" 
+    };
+  }, [statsDimension, statsMainCategory, statsYear, statsSource, clothesItems, daughterClothesItems, currentStats]);
 
   // Section 2e: Persist Clothes Items to Local Storage
   // Whenever `clothesItems` changes, save the updated array to localStorage.
@@ -1596,7 +1710,7 @@ function App() {
     
     setCName("");
     setCMainCategory("上衣");
-    setCSubCategory("T恤");
+    setCSubCategory("T恤短袖");
     setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
@@ -1662,7 +1776,7 @@ function App() {
     }
     setCName("");
     setCMainCategory("上衣");
-    setCSubCategory("T恤");
+    setCSubCategory("T恤短袖");
     setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
@@ -1699,7 +1813,7 @@ function App() {
     setEditingItemId(null);
     setCName("");
     setCMainCategory("上衣");
-    setCSubCategory("T恤");
+    setCSubCategory("T恤短袖");
     setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
@@ -1716,7 +1830,7 @@ function App() {
       setEditingItemId(null);
       setCName("");
       setCMainCategory("上衣");
-      setCSubCategory("T恤");
+      setCSubCategory("T恤短袖");
       setCSeason("四季");
       setCPurchaseDate("");
       setCPrice("");
@@ -1817,7 +1931,7 @@ function App() {
     
     setCName("");
     setCMainCategory("上衣");
-    setCSubCategory("T恤");
+    setCSubCategory("T恤短袖");
     setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
@@ -1883,7 +1997,7 @@ function App() {
     }
     setCName("");
     setCMainCategory("上衣");
-    setCSubCategory("T恤");
+    setCSubCategory("T恤短袖");
     setCSeason("四季");
     setCPurchaseDate("");
     setCPrice("");
@@ -2397,7 +2511,33 @@ function App() {
               </button>
             </div>
 
-            {/* 维度选择 */}
+            {/* 年份筛选（维度1） */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>年份：</span>
+              <select
+                value={statsYear}
+                onChange={(e) => setStatsYear(e.target.value)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  background: "#fff",
+                }}
+              >
+                <option value="">全部年份</option>
+                {statsAvailableYears.map((year) => (
+                  <option key={year} value={year}>{year}年</option>
+                ))}
+              </select>
+              {statsYear && (
+                <span style={{ fontSize: 13, color: "#0066cc" }}>
+                  已筛选：{statsYear}年
+                </span>
+              )}
+            </div>
+
+            {/* 维度选择（维度2） */}
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
               <span style={{ fontSize: 14, color: "#666", alignSelf: "center", marginRight: 4 }}>维度：</span>
               <button
@@ -2429,21 +2569,6 @@ function App() {
                 }}
               >
                 小类
-              </button>
-              <button
-                type="button"
-                onClick={() => setStatsDimension("year")}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #ccc",
-                  background: statsDimension === "year" ? "#333" : "#fff",
-                  color: statsDimension === "year" ? "#fff" : "#333",
-                  cursor: "pointer",
-                  fontSize: 14,
-                }}
-              >
-                年份
               </button>
               <button
                 type="button"
@@ -2499,50 +2624,202 @@ function App() {
               </div>
             )}
 
-            {/* 汇总卡片：件数、总金额 */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
-              <div style={{ padding: 16, background: statsSource === "clothes" ? "#f0f7ff" : "#fff5f0", borderRadius: 10, border: statsSource === "clothes" ? "1px solid #d0e7ff" : "1px solid #ffd0c0", textAlign: "center" }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: statsSource === "clothes" ? "#0066cc" : "#e65100" }}>{currentStats.count}</div>
-                <div style={{ fontSize: 13, color: "#666" }}>件（在用）</div>
-              </div>
-              <div style={{ padding: 16, background: "#f0fff4", borderRadius: 10, border: "1px solid #c6e8c9", textAlign: "center" }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: "#28a745" }}>¥{currentStats.totalPrice.toFixed(2)}</div>
-                <div style={{ fontSize: 13, color: "#666" }}>总金额</div>
-              </div>
-            </div>
+            {/* 汇总卡片：件数、总金额、件均（根据维度选择动态变化） */}
+            {(() => {
+              const countPct = allStats.count ? ((displayStats.count / allStats.count) * 100).toFixed(1) : "0";
+              const amountPct = allStats.totalPrice ? ((displayStats.totalPrice / allStats.totalPrice) * 100).toFixed(1) : "0";
+              const isFiltered = statsDimension === "subCategory" || statsYear; // 是否有筛选
+              const avgPrice = displayStats.count > 0 ? Math.round(displayStats.totalPrice / displayStats.count) : 0;
+              return (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
+                  <div style={{ padding: 16, background: statsSource === "clothes" ? "#f0f7ff" : "#fff5f0", borderRadius: 10, border: statsSource === "clothes" ? "1px solid #d0e7ff" : "1px solid #ffd0c0", textAlign: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: statsSource === "clothes" ? "#0066cc" : "#e65100" }}>
+                      {displayStats.count} <span style={{ fontSize: 14, fontWeight: 500 }}>件</span>
+                    </div>
+                    {isFiltered && <div style={{ fontSize: 13, color: "#888" }}>占比 {countPct}%</div>}
+                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>（{displayStats.label}）</div>
+                  </div>
+                  <div style={{ padding: 16, background: "#f0fff4", borderRadius: 10, border: "1px solid #c6e8c9", textAlign: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: "#28a745" }}>¥{displayStats.totalPrice.toFixed(0)}</div>
+                    {isFiltered && <div style={{ fontSize: 13, color: "#888" }}>占比 {amountPct}%</div>}
+                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>（{displayStats.label}）</div>
+                  </div>
+                  <div style={{ padding: 16, background: "#fff8e1", borderRadius: 10, border: "1px solid #ffe082", textAlign: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: "#f57c00" }}>¥{avgPrice}</div>
+                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>件均</div>
+                  </div>
+                </div>
+              );
+            })()}
 
-            {/* 按所选维度展示：名称、件数、占比、金额、条形图 */}
-            {currentStats.count > 0 && (
-              <section>
-                <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "#555" }}>按{dimensionLabel}</h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {dimensionData.map(({ name, count, amount }) => {
-                    const pct = currentStats.count ? ((count / currentStats.count) * 100).toFixed(1) : "0";
-                    const amountPct = currentStats.totalPrice ? ((amount / currentStats.totalPrice) * 100).toFixed(1) : "0";
-                    return (
-                      <div key={name} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                        <span style={{ minWidth: 72, fontSize: 13, fontWeight: 500 }}>{name}</span>
-                        <div style={{ flex: "1 1 120px", minWidth: 80, height: 22, background: "#eee", borderRadius: 4, overflow: "hidden" }}>
-                          <div
-                            style={{
-                              width: `${currentStats.count ? (count / currentStats.count) * 100 : 0}%`,
-                              height: "100%",
-                              background: statsSource === "clothes" ? "#0066cc" : "#e65100",
-                              borderRadius: 4,
-                            }}
-                          />
+            {/* 按所选维度展示 */}
+            {statsYear ? (
+              /* 选择了具体年份：展示该年份的维度数据 */
+              displayStats.count > 0 && (
+                <section>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "#555" }}>按{dimensionLabel}（{displayStats.label}）</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {dimensionData.map(({ name, count, amount }) => {
+                      const pct = displayStats.count ? ((count / displayStats.count) * 100).toFixed(1) : "0";
+                      const amountPct = displayStats.totalPrice ? ((amount / displayStats.totalPrice) * 100).toFixed(1) : "0";
+                      return (
+                        <div key={name} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <span style={{ minWidth: 72, fontSize: 13, fontWeight: 500 }}>{name}</span>
+                          <div style={{ flex: "1 1 120px", minWidth: 80, height: 22, background: "#eee", borderRadius: 4, overflow: "hidden" }}>
+                            <div
+                              style={{
+                                width: `${displayStats.count ? (count / displayStats.count) * 100 : 0}%`,
+                                height: "100%",
+                                background: statsSource === "clothes" ? "#0066cc" : "#e65100",
+                                borderRadius: 4,
+                              }}
+                            />
+                          </div>
+                          <span style={{ fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
+                            {count} 件（{pct}%）
+                          </span>
+                          <span style={{ fontSize: 13, color: "#28a745", fontWeight: 500, whiteSpace: "nowrap" }}>
+                            ¥{amount.toFixed(2)}（{amountPct}%）
+                          </span>
                         </div>
-                        <span style={{ fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
-                          {count} 件（{pct}%）
-                        </span>
-                        <span style={{ fontSize: 13, color: "#28a745", fontWeight: 500, whiteSpace: "nowrap" }}>
-                          ¥{amount.toFixed(2)}（{amountPct}%）
-                        </span>
+                      );
+                    })}
+                  </div>
+                </section>
+              )
+            ) : (
+              /* 未选择年份：单一表格式跨年份对比图表 */
+              crossYearComparisonData && crossYearComparisonData.dimensionValues.length > 0 && (
+                <section>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "#555" }}>按{dimensionLabel} - 年度对比</h3>
+                  
+                  {/* 计算全局最大件数用于统一条形图比例 */}
+                  {(() => {
+                    const yearColors = ["#0066cc", "#e65100", "#28a745", "#9c27b0", "#795548", "#607d8b", "#ff5722", "#009688"];
+                    const globalMaxCount = Math.max(
+                      ...crossYearComparisonData.dimensionValues.flatMap((dv) =>
+                        crossYearComparisonData.years.map((y) => crossYearComparisonData.dataMap[dv][y]?.count || 0)
+                      ),
+                      1
+                    );
+                    
+                    // 计算每个维度值的行合计
+                    const rowTotals = {};
+                    crossYearComparisonData.dimensionValues.forEach((dv) => {
+                      let totalCount = 0, totalAmount = 0;
+                      crossYearComparisonData.years.forEach((y) => {
+                        const d = crossYearComparisonData.dataMap[dv][y] || { count: 0, amount: 0 };
+                        totalCount += d.count;
+                        totalAmount += d.amount;
+                      });
+                      rowTotals[dv] = { count: totalCount, amount: totalAmount };
+                    });
+                    
+                    // 计算每个年份的列合计（已有 yearStats）
+                    // 计算总合计
+                    const grandTotal = {
+                      count: crossYearComparisonData.years.reduce((sum, y) => sum + (crossYearComparisonData.yearStats[y]?.count || 0), 0),
+                      amount: crossYearComparisonData.years.reduce((sum, y) => sum + (crossYearComparisonData.yearStats[y]?.totalPrice || 0), 0),
+                    };
+                    
+                    return (
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 500 }}>
+                          {/* 表头：维度值 + 合计 + 各年份 */}
+                          <thead>
+                            <tr style={{ background: "#f5f5f5" }}>
+                              <th style={{ padding: "10px 8px", textAlign: "left", borderBottom: "2px solid #ddd", minWidth: 70 }}>{dimensionLabel}</th>
+                              <th style={{ padding: "10px 8px", textAlign: "center", borderBottom: "2px solid #ddd", minWidth: 100, background: "#e3f2fd" }}>
+                                <span style={{ fontWeight: 600 }}>合计</span>
+                              </th>
+                              {crossYearComparisonData.years.map((year, idx) => {
+                                return (
+                                  <th key={year} style={{ padding: "10px 8px", textAlign: "center", borderBottom: "2px solid #ddd", minWidth: 120 }}>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                                      <div style={{ width: 10, height: 10, borderRadius: 2, background: yearColors[idx % yearColors.length] }} />
+                                      <span>{year}年</span>
+                                    </div>
+                                  </th>
+                                );
+                              })}
+                            </tr>
+                            {/* 合计行（紧跟表头） */}
+                            <tr style={{ background: "#e3f2fd", fontWeight: 600 }}>
+                              <td style={{ padding: "10px 8px", borderBottom: "2px solid #90caf9" }}>合计</td>
+                              {/* 总合计（第2列） */}
+                              <td style={{ padding: "10px 8px", textAlign: "center", borderBottom: "2px solid #90caf9", background: "#bbdefb" }}>
+                                <div style={{ color: "#333" }}>{grandTotal.count}件</div>
+                                <div style={{ fontSize: 11, color: "#28a745" }}>¥{grandTotal.amount.toFixed(0)}</div>
+                              </td>
+                              {crossYearComparisonData.years.map((year) => {
+                                const ys = crossYearComparisonData.yearStats[year];
+                                const colPct = grandTotal.count ? (((ys?.count || 0) / grandTotal.count) * 100).toFixed(1) : "0";
+                                return (
+                                  <td key={year} style={{ padding: "10px 8px", textAlign: "center", borderBottom: "2px solid #90caf9" }}>
+                                    <div style={{ color: "#333" }}>{ys?.count || 0}件</div>
+                                    <div style={{ fontSize: 11, color: "#666", fontWeight: 400 }}>({colPct}%)</div>
+                                    <div style={{ fontSize: 11, color: "#28a745" }}>¥{(ys?.totalPrice || 0).toFixed(0)}</div>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          </thead>
+                          {/* 表体：每行一个维度值，合计列在第2列 */}
+                          <tbody>
+                            {crossYearComparisonData.dimensionValues.map((dimVal, rowIdx) => {
+                              const rowTotal = rowTotals[dimVal];
+                              const rowCountPct = grandTotal.count ? ((rowTotal.count / grandTotal.count) * 100).toFixed(1) : "0";
+                              const rowAmountPct = grandTotal.amount ? ((rowTotal.amount / grandTotal.amount) * 100).toFixed(1) : "0";
+                              return (
+                                <tr key={dimVal} style={{ background: rowIdx % 2 === 0 ? "#fff" : "#fafafa" }}>
+                                  <td style={{ padding: "8px", fontWeight: 500, borderBottom: "1px solid #eee", verticalAlign: "middle" }}>{dimVal}</td>
+                                  {/* 行合计（第2列，浅蓝底色） */}
+                                  <td style={{ padding: "8px", borderBottom: "1px solid #eee", verticalAlign: "middle", background: "#e3f2fd" }}>
+                                    <div style={{ textAlign: "center" }}>
+                                      <div style={{ fontWeight: 600, color: "#333" }}>{rowTotal.count}件（{rowCountPct}%）</div>
+                                      <div style={{ fontSize: 11, color: "#28a745", fontWeight: 500 }}>¥{rowTotal.amount.toFixed(0)}（{rowAmountPct}%）</div>
+                                    </div>
+                                  </td>
+                                  {crossYearComparisonData.years.map((year, idx) => {
+                                    const { count, amount } = crossYearComparisonData.dataMap[dimVal][year] || { count: 0, amount: 0 };
+                                    const ys = crossYearComparisonData.yearStats[year];
+                                    const pct = ys?.count ? ((count / ys.count) * 100).toFixed(1) : "0";
+                                    const barWidth = globalMaxCount > 0 ? (count / globalMaxCount) * 100 : 0;
+                                    const color = yearColors[idx % yearColors.length];
+                                    return (
+                                      <td key={year} style={{ padding: "8px", borderBottom: "1px solid #eee", verticalAlign: "middle" }}>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                          {/* 条形图 */}
+                                          <div style={{ height: 14, background: "#e8e8e8", borderRadius: 3, overflow: "hidden" }}>
+                                            <div
+                                              style={{
+                                                width: `${barWidth}%`,
+                                                height: "100%",
+                                                background: color,
+                                                borderRadius: 3,
+                                                transition: "width 0.3s ease",
+                                              }}
+                                            />
+                                          </div>
+                                          {/* 数值 */}
+                                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                                            <span style={{ color: "#333" }}>{count}件（{pct}%）</span>
+                                            <span style={{ color: "#28a745", fontWeight: 500 }}>¥{amount.toFixed(0)}</span>
+                                          </div>
+                                        </div>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     );
-                  })}
-                </div>
-              </section>
+                  })()}
+                </section>
+              )
             )}
           </div>
         ) : category === "clothes" ? (
@@ -2961,6 +3238,7 @@ function App() {
                     <div onClick={() => { const next = sortField === "season" && sortDirection === "asc" ? "desc" : "asc"; setSortField("season"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>季节{sortField === "season" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "frequency" && sortDirection === "asc" ? "desc" : "asc"; setSortField("frequency"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>穿着频度{sortField === "frequency" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "color" && sortDirection === "asc" ? "desc" : "asc"; setSortField("color"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>颜色{sortField === "color" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "updatedAt" && sortDirection === "asc" ? "desc" : "asc"; setSortField("updatedAt"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>更新{sortField === "updatedAt" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                   </div>
                   {sortedClothesItems.map((it) => {
                     const isSelected = selectedItemId === it.id || selectedItemIds.has(it.id) || editingItemId === it.id;
@@ -3076,6 +3354,7 @@ function App() {
                           <div>{it.season ? mapSeason(it.season) : "-"}</div>
                           <div style={{ color: (() => { const freq = it.frequency ? mapFrequency(it.frequency) : ""; if (freq === "偶尔" || freq === "从未") return "#dc3545"; if (freq === "经常" || freq === "每天") return "#28a745"; return "#666"; })() }}>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
                           <div>{it.color || "-"}</div>
+                          <div>{it.updatedAt ? (() => { try { const d = new Date(it.updatedAt); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; } catch { return it.updatedAt; } })() : "-"}</div>
                         </div>
                         {/* 缘尽信息单独显示 */}
                         {it.endReason && (
@@ -3673,6 +3952,7 @@ function App() {
                     <div onClick={() => { const next = sortField === "season" && sortDirection === "asc" ? "desc" : "asc"; setSortField("season"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>季节{sortField === "season" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "frequency" && sortDirection === "asc" ? "desc" : "asc"; setSortField("frequency"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>穿着频度{sortField === "frequency" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "color" && sortDirection === "asc" ? "desc" : "asc"; setSortField("color"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>颜色{sortField === "color" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "updatedAt" && sortDirection === "asc" ? "desc" : "asc"; setSortField("updatedAt"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>更新{sortField === "updatedAt" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                   </div>
                   {sortedDaughterClothesItems.map((it) => {
                     const isSelected = selectedItemId === it.id || selectedItemIds.has(it.id) || editingItemId === it.id;
@@ -3788,6 +4068,7 @@ function App() {
                           <div>{it.season ? mapSeason(it.season) : "-"}</div>
                           <div style={{ color: (() => { const freq = it.frequency ? mapFrequency(it.frequency) : ""; if (freq === "偶尔" || freq === "从未") return "#dc3545"; if (freq === "经常" || freq === "每天") return "#28a745"; return "#666"; })() }}>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
                           <div>{it.color || "-"}</div>
+                          <div>{it.updatedAt ? (() => { try { const d = new Date(it.updatedAt); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; } catch { return it.updatedAt; } })() : "-"}</div>
                         </div>
                         {/* 缘尽信息单独显示 */}
                         {it.endReason && (

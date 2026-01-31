@@ -100,7 +100,7 @@ export function localToDbItem(localItem, userId) {
   if (!subCategory || subCategory === null || subCategory === undefined || subCategory === '') {
     // 根据 mainCategory 设置默认值
     if (mainCategory === '上衣') {
-      subCategory = 'T恤';
+      subCategory = 'T恤短袖';
     } else if (mainCategory === '下装') {
       subCategory = '牛仔裤';
     } else if (mainCategory === '连衣裙') {
@@ -163,6 +163,9 @@ function getColorHexFromName(colorName) {
     "驼色": "#D2B48C",
     "军绿色": "#4B5320",
     "藏青色": "#1E3A5F",
+    "条纹": "#6B6B6B",
+    "小碎花": "#E8B4B8",
+    "鲜艳花": "#E91E63",
     "其他": "#CCCCCC",
   };
   return colorMap[colorName] || '#000000';
@@ -210,7 +213,7 @@ export function dbToLocalItem(dbItem) {
     // 如果 sub_category 为空，根据 main_category 设置默认值
     const mainCategory = dbItem.main_category || '上衣';
     if (mainCategory === '上衣') {
-      subCategory = 'T恤';
+      subCategory = 'T恤短袖';
     } else if (mainCategory === '下装') {
       subCategory = '牛仔裤';
     } else if (mainCategory === '外套') {
@@ -315,7 +318,7 @@ export function mergeItems(localItems, remoteItems) {
           if (!mergedSubCategory) {
             const mainCategory = remoteItem.mainCategory || localItem.mainCategory || '上衣';
             if (mainCategory === '上衣') {
-              mergedSubCategory = 'T恤';
+              mergedSubCategory = 'T恤短袖';
             } else if (mainCategory === '下装') {
               mergedSubCategory = '牛仔裤';
             } else if (mainCategory === '外套') {
