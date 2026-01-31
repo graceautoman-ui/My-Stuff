@@ -193,23 +193,17 @@ function App() {
       }));
       console.log(`💾 本地数据: 衣物 ${localClothes.length} 条, 女儿衣物 ${localDaughter.length} 条`);
 
-      // 3. 转换远程数据格式并映射频率值
-      const remoteClothes = (clothesResult.items || []).map(item => {
-        const localItem = dbToLocalItem(item);
-        return {
-          ...localItem,
-          frequency: mapFrequency(localItem.frequency),
-          season: mapSeason(localItem.season)
-        };
-      });
-      const remoteDaughter = (daughterResult.items || []).map(item => {
-        const localItem = dbToLocalItem(item);
-        return {
-          ...localItem,
-          frequency: mapFrequency(localItem.frequency),
-          season: mapSeason(localItem.season)
-        };
-      });
+      // 3. 远程数据已在 downloadItemsFromSupabase 内通过 dbToLocalItem 转换，此处仅映射 frequency/season
+      const remoteClothes = (clothesResult.items || []).map(item => ({
+        ...item,
+        frequency: mapFrequency(item.frequency),
+        season: mapSeason(item.season)
+      }));
+      const remoteDaughter = (daughterResult.items || []).map(item => ({
+        ...item,
+        frequency: mapFrequency(item.frequency),
+        season: mapSeason(item.season)
+      }));
 
       // 4. 合并数据（处理冲突）
       const mergedClothes = mergeItems(localClothes, remoteClothes);
@@ -825,6 +819,10 @@ function App() {
   const [filterMainCategory, setFilterMainCategory] = useState(""); // "" | mainCategory
   const [filterSubCategory, setFilterSubCategory] = useState(""); // "" | subCategory
 
+  // 排序状态
+  const [sortField, setSortField] = useState(null); // null | 'purchaseDate' | 'purchaseDuration' | 'price' | 'season' | 'frequency' | 'color'
+  const [sortDirection, setSortDirection] = useState("asc"); // 'asc' | 'desc'
+
   // Section 2c-5: Selected Item State
   // Tracks which item is currently selected for single selection, or Set for batch delete.
 
@@ -1200,8 +1198,49 @@ function App() {
     
     const active = filtered.filter((item) => !item.endReason);
     const ended = filtered.filter((item) => item.endReason);
-    return [...active, ...ended];
-  }, [clothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory]);
+    let result = [...active, ...ended];
+
+    // 应用排序
+    if (sortField) {
+      const dir = sortDirection === "asc" ? 1 : -1;
+      result = [...result].sort((a, b) => {
+        let va, vb;
+        if (sortField === "purchaseDate") {
+          va = a.purchaseDate || "";
+          vb = b.purchaseDate || "";
+          return dir * (va.localeCompare(vb) || 0);
+        }
+        if (sortField === "purchaseDuration") {
+          va = a.purchaseDate ? (calculatePurchaseDuration(a.purchaseDate) || 0) : 0;
+          vb = b.purchaseDate ? (calculatePurchaseDuration(b.purchaseDate) || 0) : 0;
+          return dir * (va - vb);
+        }
+        if (sortField === "price") {
+          va = a.price != null ? Number(a.price) : 0;
+          vb = b.price != null ? Number(b.price) : 0;
+          return dir * (va - vb);
+        }
+        if (sortField === "season") {
+          va = mapSeason(a.season) || "";
+          vb = mapSeason(b.season) || "";
+          return dir * (va.localeCompare(vb) || 0);
+        }
+        if (sortField === "frequency") {
+          const order = { 从未: 0, 偶尔: 1, 有时: 2, 经常: 3, 每天: 4 };
+          va = order[mapFrequency(a.frequency)] ?? 0;
+          vb = order[mapFrequency(b.frequency)] ?? 0;
+          return dir * (va - vb);
+        }
+        if (sortField === "color") {
+          va = a.color || "";
+          vb = b.color || "";
+          return dir * (va.localeCompare(vb) || 0);
+        }
+        return 0;
+      });
+    }
+    return result;
+  }, [clothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory, sortField, sortDirection]);
 
   // Section 2e-0-1: Sorted and Filtered Daughter Clothes Items
   // Sorts daughter clothes items: items with endReason go to the end.
@@ -1239,8 +1278,49 @@ function App() {
     
     const active = filtered.filter((item) => !item.endReason);
     const ended = filtered.filter((item) => item.endReason);
-    return [...active, ...ended];
-  }, [daughterClothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory]);
+    let result = [...active, ...ended];
+
+    // 应用排序
+    if (sortField) {
+      const dir = sortDirection === "asc" ? 1 : -1;
+      result = [...result].sort((a, b) => {
+        let va, vb;
+        if (sortField === "purchaseDate") {
+          va = a.purchaseDate || "";
+          vb = b.purchaseDate || "";
+          return dir * (va.localeCompare(vb) || 0);
+        }
+        if (sortField === "purchaseDuration") {
+          va = a.purchaseDate ? (calculatePurchaseDuration(a.purchaseDate) || 0) : 0;
+          vb = b.purchaseDate ? (calculatePurchaseDuration(b.purchaseDate) || 0) : 0;
+          return dir * (va - vb);
+        }
+        if (sortField === "price") {
+          va = a.price != null ? Number(a.price) : 0;
+          vb = b.price != null ? Number(b.price) : 0;
+          return dir * (va - vb);
+        }
+        if (sortField === "season") {
+          va = mapSeason(a.season) || "";
+          vb = mapSeason(b.season) || "";
+          return dir * (va.localeCompare(vb) || 0);
+        }
+        if (sortField === "frequency") {
+          const order = { 从未: 0, 偶尔: 1, 有时: 2, 经常: 3, 每天: 4 };
+          va = order[mapFrequency(a.frequency)] ?? 0;
+          vb = order[mapFrequency(b.frequency)] ?? 0;
+          return dir * (va - vb);
+        }
+        if (sortField === "color") {
+          va = a.color || "";
+          vb = b.color || "";
+          return dir * (va.localeCompare(vb) || 0);
+        }
+        return 0;
+      });
+    }
+    return result;
+  }, [daughterClothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory, sortField, sortDirection]);
 
   // Section 2e-0-2: Filter Statistics for Clothes Items
   // Calculates statistics for filtered clothes items: count and total price.
@@ -2499,12 +2579,12 @@ function App() {
                       border: "1px solid #e0e0e0",
                     }}
                   >
-                    <div>购入时间</div>
-                    <div>购入时长</div>
-                    <div>价格</div>
-                    <div>季节</div>
-                    <div>穿着频度</div>
-                    <div>颜色</div>
+                    <div onClick={() => { const next = sortField === "purchaseDate" && sortDirection === "asc" ? "desc" : "asc"; setSortField("purchaseDate"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>购入时间{sortField === "purchaseDate" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "purchaseDuration" && sortDirection === "asc" ? "desc" : "asc"; setSortField("purchaseDuration"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>购入时长{sortField === "purchaseDuration" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "price" && sortDirection === "asc" ? "desc" : "asc"; setSortField("price"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>价格{sortField === "price" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "season" && sortDirection === "asc" ? "desc" : "asc"; setSortField("season"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>季节{sortField === "season" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "frequency" && sortDirection === "asc" ? "desc" : "asc"; setSortField("frequency"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>穿着频度{sortField === "frequency" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "color" && sortDirection === "asc" ? "desc" : "asc"; setSortField("color"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>颜色{sortField === "color" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                   </div>
                   {sortedClothesItems.map((it) => {
                     const isSelected = selectedItemId === it.id || selectedItemIds.has(it.id) || editingItemId === it.id;
@@ -2617,7 +2697,7 @@ function App() {
                               : "-"}
                           </div>
                           <div>{it.season ? mapSeason(it.season) : "-"}</div>
-                          <div>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
+                          <div style={{ color: (() => { const freq = it.frequency ? mapFrequency(it.frequency) : ""; if (freq === "偶尔" || freq === "从未") return "#dc3545"; if (freq === "经常" || freq === "每天") return "#28a745"; return "#666"; })() }}>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
                           <div>{it.color || "-"}</div>
                         </div>
                         {/* 缘尽信息单独显示 */}
@@ -3214,12 +3294,12 @@ function App() {
                       border: "1px solid #e0e0e0",
                     }}
                   >
-                    <div>购入时间</div>
-                    <div>购入时长</div>
-                    <div>价格</div>
-                    <div>季节</div>
-                    <div>穿着频度</div>
-                    <div>颜色</div>
+                    <div onClick={() => { const next = sortField === "purchaseDate" && sortDirection === "asc" ? "desc" : "asc"; setSortField("purchaseDate"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>购入时间{sortField === "purchaseDate" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "purchaseDuration" && sortDirection === "asc" ? "desc" : "asc"; setSortField("purchaseDuration"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>购入时长{sortField === "purchaseDuration" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "price" && sortDirection === "asc" ? "desc" : "asc"; setSortField("price"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>价格{sortField === "price" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "season" && sortDirection === "asc" ? "desc" : "asc"; setSortField("season"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>季节{sortField === "season" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "frequency" && sortDirection === "asc" ? "desc" : "asc"; setSortField("frequency"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>穿着频度{sortField === "frequency" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div onClick={() => { const next = sortField === "color" && sortDirection === "asc" ? "desc" : "asc"; setSortField("color"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>颜色{sortField === "color" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                   </div>
                   {sortedDaughterClothesItems.map((it) => {
                     const isSelected = selectedItemId === it.id || selectedItemIds.has(it.id) || editingItemId === it.id;
@@ -3332,7 +3412,7 @@ function App() {
                               : "-"}
                           </div>
                           <div>{it.season ? mapSeason(it.season) : "-"}</div>
-                          <div>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
+                          <div style={{ color: (() => { const freq = it.frequency ? mapFrequency(it.frequency) : ""; if (freq === "偶尔" || freq === "从未") return "#dc3545"; if (freq === "经常" || freq === "每天") return "#28a745"; return "#666"; })() }}>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
                           <div>{it.color || "-"}</div>
                         </div>
                         {/* 缘尽信息单独显示 */}
