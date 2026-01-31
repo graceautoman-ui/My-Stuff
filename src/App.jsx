@@ -818,6 +818,7 @@ function App() {
   const [filterSeason, setFilterSeason] = useState(""); // "" | season
   const [filterMainCategory, setFilterMainCategory] = useState(""); // "" | mainCategory
   const [filterSubCategory, setFilterSubCategory] = useState(""); // "" | subCategory
+  const [searchQuery, setSearchQuery] = useState(""); // 按名称模糊搜索
 
   // 排序状态
   const [sortField, setSortField] = useState(null); // null | 'purchaseDate' | 'purchaseDuration' | 'price' | 'season' | 'frequency' | 'color'
@@ -1168,6 +1169,7 @@ function App() {
 
   const sortedClothesItems = useMemo(() => {
     let filtered = clothesItems;
+
     
     // Filter by year if set
     if (filterYear) {
@@ -1194,6 +1196,12 @@ function App() {
     // Filter by subcategory if set
     if (filterSubCategory) {
       filtered = filtered.filter((item) => item.subCategory === filterSubCategory);
+    }
+
+    // 按名称模糊搜索
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter((item) => (item.name || "").toLowerCase().includes(q));
     }
     
     const active = filtered.filter((item) => !item.endReason);
@@ -1240,7 +1248,7 @@ function App() {
       });
     }
     return result;
-  }, [clothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory, sortField, sortDirection]);
+  }, [clothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory, searchQuery, sortField, sortDirection]);
 
   // Section 2e-0-1: Sorted and Filtered Daughter Clothes Items
   // Sorts daughter clothes items: items with endReason go to the end.
@@ -1275,6 +1283,12 @@ function App() {
     if (filterSubCategory) {
       filtered = filtered.filter((item) => item.subCategory === filterSubCategory);
     }
+
+    // 按名称模糊搜索
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter((item) => (item.name || "").toLowerCase().includes(q));
+    }
     
     const active = filtered.filter((item) => !item.endReason);
     const ended = filtered.filter((item) => item.endReason);
@@ -1320,7 +1334,7 @@ function App() {
       });
     }
     return result;
-  }, [daughterClothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory, sortField, sortDirection]);
+  }, [daughterClothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory, searchQuery, sortField, sortDirection]);
 
   // Section 2e-0-2: Filter Statistics for Clothes Items
   // Calculates statistics for filtered clothes items: count and total price.
@@ -1582,6 +1596,8 @@ function App() {
     setCPrice("");
     setCFrequency("偶尔");
     setCColor("黑色");
+    setSelectedItemId(null);
+    setSelectedItemIds(new Set());
   }
 
   // Section 2g: Remove Clothes Item Handler
@@ -1716,17 +1732,9 @@ function App() {
   // Section 2g-3-1: Copy Clothes Item Handler
   // Copies an item's data into the form for creating a new item (e.g., same item in different color).
 
-  function copyClothesItem(item) {
-    setEditingItemId(null); // Ensure we're in add mode, not edit mode
-    setCName(item.name);
-    setCMainCategory(item.mainCategory || "上衣");
-    setCSubCategory(item.subCategory || "T恤");
-    setCSeason(normalizeSeason(item.season));
-    setCPurchaseDate(item.purchaseDate || "");
-    setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
-    setCFrequency(mapFrequency(item.frequency || "偶尔"));
-    setCColor(item.color || "黑色"); // 保留原物品的颜色
-    // Scroll to form area (optional, but helpful UX)
+  // 复制：保持表单内容不变，切换为新增模式（保存→新增），点击新增后做重复校验并新增
+  function copyClothesItem() {
+    setEditingItemId(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1809,6 +1817,8 @@ function App() {
     setCPrice("");
     setCFrequency("偶尔");
     setCColor("黑色");
+    setSelectedItemId(null);
+    setSelectedItemIds(new Set());
   }
 
   // Section 2g-1: Remove Daughter Clothes Item Handler
@@ -1928,17 +1938,9 @@ function App() {
   // Section 2g-7-1: Copy Daughter Clothes Item Handler
   // Copies a daughter item's data into the form for creating a new item (e.g., same item in different color).
 
-  function copyDaughterClothesItem(item) {
-    setEditingItemId(null); // Ensure we're in add mode, not edit mode
-    setCName(item.name);
-    setCMainCategory(item.mainCategory || "上衣");
-    setCSubCategory(item.subCategory || "T恤");
-    setCSeason(normalizeSeason(item.season));
-    setCPurchaseDate(item.purchaseDate || "");
-    setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
-    setCFrequency(mapFrequency(item.frequency || "偶尔"));
-    setCColor(item.color || "黑色"); // 保留原物品的颜色
-    // Scroll to form area (optional, but helpful UX)
+  // 复制：保持表单内容不变，切换为新增模式（保存→新增），点击新增后做重复校验并新增
+  function copyDaughterClothesItem() {
+    setEditingItemId(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -2569,6 +2571,20 @@ function App() {
               }}
             >
               <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>筛选：</span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="按名称搜索"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  minWidth: 120,
+                  marginRight: 8,
+                }}
+              />
               <select
                 value={filterYear}
                 onChange={(e) => setFilterYear(e.target.value)}
@@ -2647,13 +2663,14 @@ function App() {
                 ))}
               </select>
 
-              {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
+              {(filterYear || filterSeason || filterMainCategory || filterSubCategory || searchQuery.trim()) && (
                 <button
                   onClick={() => {
                     setFilterYear("");
                     setFilterSeason("");
                     setFilterMainCategory("");
                     setFilterSubCategory("");
+                    setSearchQuery("");
                   }}
                   style={{
                     padding: "8px 12px",
@@ -3143,10 +3160,7 @@ function App() {
                           已选中：{selectedItem.name}
                         </span>
                         <button
-                          onClick={() => {
-                            copyClothesItem(selectedItem);
-                            setSelectedItemId(null);
-                          }}
+                          onClick={() => copyClothesItem()}
                           style={{
                             padding: "8px 16px",
                             borderRadius: 8,
@@ -3268,6 +3282,20 @@ function App() {
               }}
             >
               <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>筛选：</span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="按名称搜索"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  minWidth: 120,
+                  marginRight: 8,
+                }}
+              />
               <select
                 value={filterYear}
                 onChange={(e) => setFilterYear(e.target.value)}
@@ -3346,13 +3374,14 @@ function App() {
                 ))}
               </select>
 
-              {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
+              {(filterYear || filterSeason || filterMainCategory || filterSubCategory || searchQuery.trim()) && (
                 <button
                   onClick={() => {
                     setFilterYear("");
                     setFilterSeason("");
                     setFilterMainCategory("");
                     setFilterSubCategory("");
+                    setSearchQuery("");
                   }}
                   style={{
                     padding: "8px 12px",
@@ -3842,10 +3871,7 @@ function App() {
                           已选中：{selectedItem.name}
                         </span>
                         <button
-                          onClick={() => {
-                            copyDaughterClothesItem(selectedItem);
-                            setSelectedItemId(null);
-                          }}
+                          onClick={() => copyDaughterClothesItem()}
                           style={{
                             padding: "8px 16px",
                             borderRadius: 8,
