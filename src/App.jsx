@@ -21,7 +21,7 @@ const STORAGE_KEY_DAUGHTER = "grace_stuff_daughter_clothes_v1";
 function App() {
   // Section 2a: Auth State (Supabase)
   // Authentication state management using Supabase
-    const [session, setSession] = useState(null);
+  const [session, setSession] = useState(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
@@ -40,7 +40,7 @@ function App() {
   const [importError, setImportError] = useState("");
   const [isImporting, setIsImporting] = useState(false);
 
-    useEffect(() => {
+  useEffect(() => {
     // 1) Read session once on mount
     supabase.auth.getSession().then(({ data, error }) => {
       if (error) {
@@ -57,7 +57,7 @@ function App() {
 
     // 2) Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
-        setSession(newSession);
+      setSession(newSession);
       if (newSession && !isInitialSyncRef.current) {
         // 延迟初始化同步，避免阻塞初始渲染
         setTimeout(() => {
@@ -73,8 +73,8 @@ function App() {
       subscription.unsubscribe();
       cleanupSync();
     };
-    }, []);
-  
+  }, []);
+
   async function signInWithEmail() {
     setAuthError("");
     setLoading(true);
@@ -130,12 +130,12 @@ function App() {
     } else {
       await signInWithEmail();
     }
-    }
-  
-    async function signOut() {
+  }
+
+  async function signOut() {
     cleanupSync();
-      await supabase.auth.signOut();
-    }
+    await supabase.auth.signOut();
+  }
 
   // ========== 数据同步函数 ==========
 
@@ -825,13 +825,6 @@ function App() {
   const [filterMainCategory, setFilterMainCategory] = useState(""); // "" | mainCategory
   const [filterSubCategory, setFilterSubCategory] = useState(""); // "" | subCategory
 
-  // 搜索状态
-  const [searchQuery, setSearchQuery] = useState(""); // 搜索关键词
-  
-  // 排序状态
-  const [sortField, setSortField] = useState(null); // null | 'purchaseDate' | 'purchaseDuration' | 'price' | 'season' | 'frequency' | 'color'
-  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' | 'desc'
-
   // Section 2c-5: Selected Item State
   // Tracks which item is currently selected for single selection, or Set for batch delete.
 
@@ -1166,8 +1159,8 @@ function App() {
     if (currentSubCategories.length > 0) {
       // 如果当前子分类不在新主分类的选项列表中，才重置为第一个选项
       if (!currentSubCategories.includes(cSubCategory)) {
-      setCSubCategory(currentSubCategories[0]);
-    }
+        setCSubCategory(currentSubCategories[0]);
+      }
     }
   }, [cMainCategory, currentSubCategories, cSubCategory]);
 
@@ -1177,15 +1170,6 @@ function App() {
 
   const sortedClothesItems = useMemo(() => {
     let filtered = clothesItems;
-    
-    // Filter by search query (模糊搜索衣物名称)
-    if (searchQuery) {
-      const query = searchQuery.trim().toLowerCase();
-      filtered = filtered.filter((item) => {
-        const name = (item.name || "").toLowerCase();
-        return name.includes(query);
-      });
-    }
     
     // Filter by year if set
     if (filterYear) {
@@ -1206,10 +1190,7 @@ function App() {
     
     // Filter by main category if set
     if (filterMainCategory) {
-      filtered = filtered.filter((item) => {
-        // 严格匹配，确保 mainCategory 存在且完全相等
-        return item.mainCategory && item.mainCategory === filterMainCategory;
-      });
+      filtered = filtered.filter((item) => item.mainCategory === filterMainCategory);
     }
     
     // Filter by subcategory if set
@@ -1219,66 +1200,8 @@ function App() {
     
     const active = filtered.filter((item) => !item.endReason);
     const ended = filtered.filter((item) => item.endReason);
-    let result = [...active, ...ended];
-    
-    // 应用排序
-    if (sortField) {
-      result.sort((a, b) => {
-        let aValue, bValue;
-        
-        switch (sortField) {
-          case 'purchaseDate':
-            aValue = a.purchaseDate || '';
-            bValue = b.purchaseDate || '';
-            // 按日期字符串排序（YYYY-MM 格式可以直接字符串比较）
-            break;
-          case 'purchaseDuration':
-            aValue = a.purchaseDate ? calculatePurchaseDuration(a.purchaseDate) : null;
-            bValue = b.purchaseDate ? calculatePurchaseDuration(b.purchaseDate) : null;
-            // 按数字排序
-            aValue = aValue ? parseFloat(aValue) : 0;
-            bValue = bValue ? parseFloat(bValue) : 0;
-            break;
-          case 'price':
-            aValue = a.price !== null && a.price !== undefined ? parseFloat(a.price) : 0;
-            bValue = b.price !== null && b.price !== undefined ? parseFloat(b.price) : 0;
-            break;
-          case 'season':
-            aValue = mapSeason(a.season) || '';
-            bValue = mapSeason(b.season) || '';
-            break;
-          case 'frequency':
-            aValue = mapFrequency(a.frequency) || '';
-            bValue = mapFrequency(b.frequency) || '';
-            break;
-          case 'color':
-            aValue = a.color || '';
-            bValue = b.color || '';
-            break;
-          case 'createdAt':
-            aValue = a.createdAt || a.created_at || '';
-            bValue = b.createdAt || b.created_at || '';
-            // 按日期字符串排序
-            break;
-          default:
-            return 0;
-        }
-        
-        // 比较值
-        let comparison = 0;
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
-          comparison = aValue.localeCompare(bValue, 'zh-CN');
-        } else {
-          comparison = aValue - bValue;
-        }
-        
-        // 应用排序方向
-        return sortDirection === 'asc' ? comparison : -comparison;
-      });
-    }
-    
-    return result;
-  }, [clothesItems, searchQuery, filterYear, filterSeason, filterMainCategory, filterSubCategory, sortField, sortDirection]);
+    return [...active, ...ended];
+  }, [clothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory]);
 
   // Section 2e-0-1: Sorted and Filtered Daughter Clothes Items
   // Sorts daughter clothes items: items with endReason go to the end.
@@ -1306,10 +1229,7 @@ function App() {
     
     // Filter by main category if set
     if (filterMainCategory) {
-      filtered = filtered.filter((item) => {
-        // 严格匹配，确保 mainCategory 存在且完全相等
-        return item.mainCategory && item.mainCategory === filterMainCategory;
-      });
+      filtered = filtered.filter((item) => item.mainCategory === filterMainCategory);
     }
     
     // Filter by subcategory if set
@@ -1319,62 +1239,8 @@ function App() {
     
     const active = filtered.filter((item) => !item.endReason);
     const ended = filtered.filter((item) => item.endReason);
-    let result = [...active, ...ended];
-    
-    // 应用排序
-    if (sortField) {
-      result.sort((a, b) => {
-        let aValue, bValue;
-        
-        switch (sortField) {
-          case 'purchaseDate':
-            aValue = a.purchaseDate || '';
-            bValue = b.purchaseDate || '';
-            break;
-          case 'purchaseDuration':
-            aValue = a.purchaseDate ? calculatePurchaseDuration(a.purchaseDate) : null;
-            bValue = b.purchaseDate ? calculatePurchaseDuration(b.purchaseDate) : null;
-            aValue = aValue ? parseFloat(aValue) : 0;
-            bValue = bValue ? parseFloat(bValue) : 0;
-            break;
-          case 'price':
-            aValue = a.price !== null && a.price !== undefined ? parseFloat(a.price) : 0;
-            bValue = b.price !== null && b.price !== undefined ? parseFloat(b.price) : 0;
-            break;
-          case 'season':
-            aValue = mapSeason(a.season) || '';
-            bValue = mapSeason(b.season) || '';
-            break;
-          case 'frequency':
-            aValue = mapFrequency(a.frequency) || '';
-            bValue = mapFrequency(b.frequency) || '';
-            break;
-          case 'color':
-            aValue = a.color || '';
-            bValue = b.color || '';
-            break;
-          case 'createdAt':
-            aValue = a.createdAt || a.created_at || '';
-            bValue = b.createdAt || b.created_at || '';
-            // 按日期字符串排序
-            break;
-          default:
-            return 0;
-        }
-        
-        let comparison = 0;
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
-          comparison = aValue.localeCompare(bValue, 'zh-CN');
-        } else {
-          comparison = aValue - bValue;
-        }
-        
-        return sortDirection === 'asc' ? comparison : -comparison;
-      });
-    }
-    
-    return result;
-  }, [daughterClothesItems, searchQuery, filterYear, filterSeason, filterMainCategory, filterSubCategory, sortField, sortDirection]);
+    return [...active, ...ended];
+  }, [daughterClothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory]);
 
   // Section 2e-0-2: Filter Statistics for Clothes Items
   // Calculates statistics for filtered clothes items: count and total price.
@@ -1549,15 +1415,15 @@ function App() {
       prev.map((item) => {
         if (item.id === id) {
           updatedItem = {
-              ...item,
-              name,
-              mainCategory: cMainCategory,
-              subCategory: cSubCategory,
+            ...item,
+            name,
+            mainCategory: cMainCategory,
+            subCategory: cSubCategory,
             season: mapSeason(cSeason),
-              purchaseDate: cPurchaseDate || null,
-              price: cPrice.trim() ? parseFloat(cPrice) || null : null,
+            purchaseDate: cPurchaseDate || null,
+            price: cPrice.trim() ? parseFloat(cPrice) || null : null,
             frequency: mapFrequency(cFrequency),
-              color: cColor,
+            color: cColor,
             colorHex: selectedColor?.hex || item.colorHex || "#CCCCCC",
             updatedAt: new Date().toISOString(),
           };
@@ -1650,9 +1516,9 @@ function App() {
       prev.map((item) => {
         if (item.id === id) {
           updatedItem = {
-              ...item,
-              endReason: reason,
-              endDate: new Date().toISOString(),
+            ...item,
+            endReason: reason,
+            endDate: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
           return updatedItem;
@@ -1748,15 +1614,15 @@ function App() {
       prev.map((item) => {
         if (item.id === id) {
           updatedItem = {
-              ...item,
-              name,
-              mainCategory: cMainCategory,
-              subCategory: cSubCategory,
+            ...item,
+            name,
+            mainCategory: cMainCategory,
+            subCategory: cSubCategory,
             season: mapSeason(cSeason),
-              purchaseDate: cPurchaseDate || null,
-              price: cPrice.trim() ? parseFloat(cPrice) || null : null,
+            purchaseDate: cPurchaseDate || null,
+            price: cPrice.trim() ? parseFloat(cPrice) || null : null,
             frequency: mapFrequency(cFrequency),
-              color: cColor,
+            color: cColor,
             colorHex: selectedColor?.hex || item.colorHex || "#CCCCCC",
             updatedAt: new Date().toISOString(),
           };
@@ -1817,9 +1683,9 @@ function App() {
       prev.map((item) => {
         if (item.id === id) {
           updatedItem = {
-              ...item,
-              endReason: reason,
-              endDate: new Date().toISOString(),
+            ...item,
+            endReason: reason,
+            endDate: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
           return updatedItem;
@@ -1865,7 +1731,7 @@ function App() {
 
   // Show login screen if not authenticated
   if (!session) {
-  return (
+    return (
       <div style={{ 
         padding: "clamp(16px, 4vw, 24px)", 
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif",
@@ -1922,7 +1788,7 @@ function App() {
                 required
                 disabled={loading}
                 autoComplete="email"
-          style={{
+                style={{
                   padding: "clamp(12px, 3vw, 14px) clamp(14px, 3.5vw, 16px)",
                   borderRadius: 8,
                   border: "1px solid #ccc",
@@ -1955,7 +1821,7 @@ function App() {
             
             {authError && (
               <div style={{
-            padding: "8px 12px",
+                padding: "8px 12px",
                 borderRadius: 6,
                 backgroundColor: "#fee",
                 color: "#c33",
@@ -2067,36 +1933,13 @@ function App() {
           )}
           <button
             onClick={() => {
-              // 导出本地数据为 JSON - 直接从 localStorage 读取原始数据，避免 state 被修改
-              let rawClothes = [];
-              let rawDaughter = [];
-              
-              try {
-                const clothesRaw = localStorage.getItem(STORAGE_KEY);
-                if (clothesRaw) {
-                  rawClothes = JSON.parse(clothesRaw);
-                }
-              } catch (e) {
-                console.error("读取衣物数据失败:", e);
-                rawClothes = clothesItems; // 降级使用 state
-              }
-              
-              try {
-                const daughterRaw = localStorage.getItem(STORAGE_KEY_DAUGHTER);
-                if (daughterRaw) {
-                  rawDaughter = JSON.parse(daughterRaw);
-                }
-              } catch (e) {
-                console.error("读取女儿衣物数据失败:", e);
-                rawDaughter = daughterClothesItems; // 降级使用 state
-              }
-              
+              // 导出本地数据为 JSON
               const exportData = {
-                clothesItems: rawClothes,
-                daughterClothesItems: rawDaughter,
+                clothesItems: clothesItems,
+                daughterClothesItems: daughterClothesItems,
                 localStorage: {
-                  [STORAGE_KEY]: JSON.stringify(rawClothes),
-                  [STORAGE_KEY_DAUGHTER]: JSON.stringify(rawDaughter)
+                  [STORAGE_KEY]: JSON.stringify(clothesItems),
+                  [STORAGE_KEY_DAUGHTER]: JSON.stringify(daughterClothesItems)
                 }
               };
               
@@ -2111,7 +1954,7 @@ function App() {
               document.body.removeChild(a);
               URL.revokeObjectURL(url);
               
-              alert(`✅ 导出成功！\n衣物: ${rawClothes.length} 条\n女儿衣物: ${rawDaughter.length} 条\n\n文件已下载到您的下载文件夹。`);
+              alert(`✅ 导出成功！\n衣物: ${clothesItems.length} 条\n女儿衣物: ${daughterClothesItems.length} 条\n\n文件已下载到您的下载文件夹。`);
             }}
             style={{
               padding: "8px 14px",
@@ -2286,32 +2129,6 @@ function App() {
           <div style={{ paddingBottom: sortedClothesItems.length > 0 ? "80px" : "0" }}>
             <h2 style={{ marginTop: 0 }}>Grace的衣物</h2>
 
-            {/* Search Section */}
-            <div
-              style={{
-                margin: "12px 0",
-                padding: "12px",
-                backgroundColor: "#f0f7ff",
-                borderRadius: 10,
-                border: "1px solid #d0e7ff",
-              }}
-            >
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索衣物名称..."
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #ccc",
-                  fontSize: 14,
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-
             {/* Filter Section */}
             <div
               style={{
@@ -2405,10 +2222,9 @@ function App() {
                 ))}
               </select>
 
-              {(searchQuery || filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
+              {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
                 <button
                   onClick={() => {
-                    setSearchQuery("");
                     setFilterYear("");
                     setFilterSeason("");
                     setFilterMainCategory("");
@@ -2429,7 +2245,7 @@ function App() {
             </div>
 
             {/* Filter Statistics */}
-            {(searchQuery || filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
+            {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
               <div
                 style={{
                   margin: "8px 0 12px 0",
@@ -2509,13 +2325,13 @@ function App() {
               <select
                 value={cSeason}
                 onChange={(e) => setCSeason(e.target.value)}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
                 }}
-                    >
-                      {seasons.map((s) => (
+              >
+                {seasons.map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -2683,152 +2499,18 @@ function App() {
                       border: "1px solid #e0e0e0",
                     }}
                   >
-                    <div
-                      onClick={() => {
-                        if (sortField === 'purchaseDate') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('purchaseDate');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      购入时间
-                      {sortField === 'purchaseDate' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'purchaseDuration') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('purchaseDuration');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      购入时长
-                      {sortField === 'purchaseDuration' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'price') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('price');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      价格
-                      {sortField === 'price' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'season') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('season');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      季节
-                      {sortField === 'season' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'frequency') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('frequency');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      穿着频度
-                      {sortField === 'frequency' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'color') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('color');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      颜色
-                      {sortField === 'color' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'createdAt') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('createdAt');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      创建时间
-                      {sortField === 'createdAt' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
+                    <div>购入时间</div>
+                    <div>购入时长</div>
+                    <div>价格</div>
+                    <div>季节</div>
+                    <div>穿着频度</div>
+                    <div>颜色</div>
                   </div>
                   {sortedClothesItems.map((it) => {
                     const isSelected = selectedItemId === it.id || selectedItemIds.has(it.id) || editingItemId === it.id;
                     return (
-                    <div
-                      key={it.id}
+                      <div
+                        key={it.id}
                         onClick={(e) => {
                           e.stopPropagation();
                           // 如果是全选模式，不处理单个点击
@@ -2844,11 +2526,11 @@ function App() {
                             setSelectedItemIds(new Set());
                           }
                         }}
-                      style={{
+                        style={{
                           border: isSelected ? "2px solid #0066cc" : "1px solid #eee",
-                        borderRadius: 12,
-                        padding: 12,
-                        opacity: it.endReason ? 0.6 : 1,
+                          borderRadius: 12,
+                          padding: 12,
+                          opacity: it.endReason ? 0.6 : 1,
                           backgroundColor: isSelected 
                             ? "#e6f2ff" 
                             : it.endReason 
@@ -2907,7 +2589,7 @@ function App() {
                             padding: "4px 0",
                           }}
                         >
-                              <div>
+                          <div>
                             {it.purchaseDate ? (() => {
                               try {
                                 // Handle month format (YYYY-MM) or full date format
@@ -2923,42 +2605,20 @@ function App() {
                                 return it.purchaseDate;
                               }
                             })() : "-"}
-                              </div>
+                          </div>
                           <div>
                             {it.purchaseDate && calculatePurchaseDuration(it.purchaseDate)
                               ? `${calculatePurchaseDuration(it.purchaseDate)}年`
                               : "-"}
-                              </div>
+                          </div>
                           <div>
                             {it.price !== null && it.price !== undefined
                               ? `¥${Number(it.price).toFixed(2)}`
                               : "-"}
-                            </div>
+                          </div>
                           <div>{it.season ? mapSeason(it.season) : "-"}</div>
-                          <div style={{
-                            color: (() => {
-                              const freq = it.frequency ? mapFrequency(it.frequency) : "";
-                              if (freq === "偶尔" || freq === "从未") return "#dc3545"; // 红色
-                              if (freq === "经常" || freq === "每天") return "#28a745"; // 绿色
-                              return "#666"; // 默认颜色
-                            })()
-                          }}>
-                            {it.frequency ? mapFrequency(it.frequency) : "-"}
-                          </div>
+                          <div>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
                           <div>{it.color || "-"}</div>
-                          <div>
-                            {(() => {
-                              const createdAt = it.createdAt || it.created_at;
-                              if (!createdAt) return "-";
-                              try {
-                                const date = new Date(createdAt);
-                                if (isNaN(date.getTime())) return "-";
-                                return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-                              } catch {
-                                return createdAt;
-                              }
-                            })()}
-                          </div>
                         </div>
                         {/* 缘尽信息单独显示 */}
                         {it.endReason && (
@@ -3004,7 +2664,7 @@ function App() {
                     boxShadow: "0 -2px 8px rgba(0,0,0,0.1)",
                   }}
                 >
-                              <button
+                  <button
                     onClick={() => {
                       const allSelected = sortedClothesItems.length > 0 && 
                         sortedClothesItems.every(item => selectedItemIds.has(item.id));
@@ -3018,7 +2678,7 @@ function App() {
                         setSelectedItemId(null); // 清空单选
                       }
                     }}
-                                style={{
+                    style={{
                       padding: "8px 16px",
                       borderRadius: 8,
                       border: "1px solid #0066cc",
@@ -3058,71 +2718,71 @@ function App() {
                             padding: "8px 16px",
                             borderRadius: 8,
                             border: "1px solid #0066cc",
-                                  background: "#fff",
-                                  cursor: "pointer",
+                            background: "#fff",
+                            cursor: "pointer",
                             fontSize: 14,
                             color: "#0066cc",
                             fontWeight: 500,
-                                }}
-                              >
-                                编辑
-                              </button>
-                              <button
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
                           onClick={() => {
                             copyClothesItem(selectedItem);
                             setSelectedItemId(null);
                           }}
-                                style={{
+                          style={{
                             padding: "8px 16px",
                             borderRadius: 8,
                             border: "1px solid #0066cc",
-                                  background: "#fff",
-                                  cursor: "pointer",
+                            background: "#fff",
+                            cursor: "pointer",
                             fontSize: 14,
                             color: "#0066cc",
                             fontWeight: 500,
-                                }}
-                              >
-                                复制
-                              </button>
-                              <button
+                          }}
+                        >
+                          复制
+                        </button>
+                        <button
                           onClick={() => {
                             setEndReasonItemId(selectedItemId);
                             setSelectedItemId(null);
                           }}
-                                style={{
+                          style={{
                             padding: "8px 16px",
                             borderRadius: 8,
                             border: "1px solid #ff9800",
-                                  background: "#fff",
-                                  cursor: "pointer",
+                            background: "#fff",
+                            cursor: "pointer",
                             fontSize: 14,
                             color: "#ff9800",
                             fontWeight: 500,
                           }}
                         >
                           缘尽
-                              </button>
-                              <button
+                        </button>
+                        <button
                           onClick={() => {
                             if (window.confirm(`确定要删除 "${selectedItem.name}" 吗？此操作不可撤销。`)) {
                               removeClothesItem(selectedItemId);
                               setSelectedItemId(null);
                             }
                           }}
-                                style={{
+                          style={{
                             padding: "8px 16px",
                             borderRadius: 8,
                             border: "1px solid #dc3545",
-                                  background: "#fff",
-                                  cursor: "pointer",
+                            background: "#fff",
+                            cursor: "pointer",
                             fontSize: 14,
                             color: "#dc3545",
                             fontWeight: 500,
-                                }}
-                              >
-                                删除
-                              </button>
+                          }}
+                        >
+                          删除
+                        </button>
                         <button
                           onClick={() => {
                             setSelectedItemId(null);
@@ -3144,7 +2804,7 @@ function App() {
                         </button>
                       </>
                     );
-                              })()}
+                  })()}
                   {/* 全选模式：只显示批量删除按钮 */}
                   {selectedItemIds.size > 0 && (
                     <>
@@ -3174,8 +2834,8 @@ function App() {
                       >
                         批量删除 ({selectedItemIds.size})
                       </button>
-                                </>
-                              )}
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -3183,32 +2843,6 @@ function App() {
         ) : category === "daughterClothes" ? (
           <div style={{ paddingBottom: sortedDaughterClothesItems.length > 0 ? "80px" : "0" }}>
             <h2 style={{ marginTop: 0 }}>Skye的衣物</h2>
-
-            {/* Search Section */}
-            <div
-              style={{
-                margin: "12px 0",
-                padding: "12px",
-                backgroundColor: "#f0f7ff",
-                borderRadius: 10,
-                border: "1px solid #d0e7ff",
-              }}
-            >
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索衣物名称..."
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #ccc",
-                  fontSize: 14,
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
 
             {/* Filter Section */}
             <div
@@ -3303,10 +2937,9 @@ function App() {
                 ))}
               </select>
 
-              {(searchQuery || filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
+              {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
                 <button
                   onClick={() => {
-                    setSearchQuery("");
                     setFilterYear("");
                     setFilterSeason("");
                     setFilterMainCategory("");
@@ -3327,7 +2960,7 @@ function App() {
             </div>
 
             {/* Filter Statistics */}
-            {(searchQuery || filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
+            {(filterYear || filterSeason || filterMainCategory || filterSubCategory) && (
               <div
                 style={{
                   margin: "8px 0 12px 0",
@@ -3407,13 +3040,13 @@ function App() {
               <select
                 value={cSeason}
                 onChange={(e) => setCSeason(e.target.value)}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
                 }}
-                    >
-                      {seasons.map((s) => (
+              >
+                {seasons.map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -3581,152 +3214,18 @@ function App() {
                       border: "1px solid #e0e0e0",
                     }}
                   >
-                    <div
-                      onClick={() => {
-                        if (sortField === 'purchaseDate') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('purchaseDate');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      购入时间
-                      {sortField === 'purchaseDate' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'purchaseDuration') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('purchaseDuration');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      购入时长
-                      {sortField === 'purchaseDuration' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'price') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('price');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      价格
-                      {sortField === 'price' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'season') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('season');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      季节
-                      {sortField === 'season' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'frequency') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('frequency');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      穿着频度
-                      {sortField === 'frequency' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'color') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('color');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      颜色
-                      {sortField === 'color' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
-                    <div
-                      onClick={() => {
-                        if (sortField === 'createdAt') {
-                          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-                        } else {
-                          setSortField('createdAt');
-                          setSortDirection('asc');
-                        }
-                      }}
-                      style={{
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      创建时间
-                      {sortField === 'createdAt' && (sortDirection === 'asc' ? ' ↑' : ' ↓')}
-                    </div>
+                    <div>购入时间</div>
+                    <div>购入时长</div>
+                    <div>价格</div>
+                    <div>季节</div>
+                    <div>穿着频度</div>
+                    <div>颜色</div>
                   </div>
                   {sortedDaughterClothesItems.map((it) => {
                     const isSelected = selectedItemId === it.id || selectedItemIds.has(it.id) || editingItemId === it.id;
                     return (
-                    <div
-                      key={it.id}
+                      <div
+                        key={it.id}
                         onClick={(e) => {
                           e.stopPropagation();
                           // 如果是全选模式，不处理单个点击
@@ -3742,11 +3241,11 @@ function App() {
                             setSelectedItemIds(new Set());
                           }
                         }}
-                      style={{
+                        style={{
                           border: isSelected ? "2px solid #0066cc" : "1px solid #eee",
-                        borderRadius: 12,
-                        padding: 12,
-                        opacity: it.endReason ? 0.6 : 1,
+                          borderRadius: 12,
+                          padding: 12,
+                          opacity: it.endReason ? 0.6 : 1,
                           backgroundColor: isSelected 
                             ? "#e6f2ff" 
                             : it.endReason 
@@ -3805,7 +3304,7 @@ function App() {
                             padding: "4px 0",
                           }}
                         >
-                              <div>
+                          <div>
                             {it.purchaseDate ? (() => {
                               try {
                                 // Handle month format (YYYY-MM) or full date format
@@ -3821,42 +3320,20 @@ function App() {
                                 return it.purchaseDate;
                               }
                             })() : "-"}
-                              </div>
+                          </div>
                           <div>
                             {it.purchaseDate && calculatePurchaseDuration(it.purchaseDate)
                               ? `${calculatePurchaseDuration(it.purchaseDate)}年`
                               : "-"}
-                              </div>
+                          </div>
                           <div>
                             {it.price !== null && it.price !== undefined
                               ? `¥${Number(it.price).toFixed(2)}`
                               : "-"}
-                            </div>
+                          </div>
                           <div>{it.season ? mapSeason(it.season) : "-"}</div>
-                          <div style={{
-                            color: (() => {
-                              const freq = it.frequency ? mapFrequency(it.frequency) : "";
-                              if (freq === "偶尔" || freq === "从未") return "#dc3545"; // 红色
-                              if (freq === "经常" || freq === "每天") return "#28a745"; // 绿色
-                              return "#666"; // 默认颜色
-                            })()
-                          }}>
-                            {it.frequency ? mapFrequency(it.frequency) : "-"}
-                          </div>
+                          <div>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
                           <div>{it.color || "-"}</div>
-                          <div>
-                            {(() => {
-                              const createdAt = it.createdAt || it.created_at;
-                              if (!createdAt) return "-";
-                              try {
-                                const date = new Date(createdAt);
-                                if (isNaN(date.getTime())) return "-";
-                                return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-                              } catch {
-                                return createdAt;
-                              }
-                            })()}
-                          </div>
                         </div>
                         {/* 缘尽信息单独显示 */}
                         {it.endReason && (
@@ -3902,7 +3379,7 @@ function App() {
                     boxShadow: "0 -2px 8px rgba(0,0,0,0.1)",
                   }}
                 >
-                              <button
+                  <button
                     onClick={() => {
                       const allSelected = sortedDaughterClothesItems.length > 0 && 
                         sortedDaughterClothesItems.every(item => selectedItemIds.has(item.id));
@@ -3916,7 +3393,7 @@ function App() {
                         setSelectedItemId(null); // 清空单选
                       }
                     }}
-                                style={{
+                    style={{
                       padding: "8px 16px",
                       borderRadius: 8,
                       border: "1px solid #0066cc",
@@ -3956,71 +3433,71 @@ function App() {
                             padding: "8px 16px",
                             borderRadius: 8,
                             border: "1px solid #0066cc",
-                                  background: "#fff",
-                                  cursor: "pointer",
+                            background: "#fff",
+                            cursor: "pointer",
                             fontSize: 14,
                             color: "#0066cc",
                             fontWeight: 500,
-                                }}
-                              >
-                                编辑
-                              </button>
-                              <button
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
                           onClick={() => {
                             copyDaughterClothesItem(selectedItem);
                             setSelectedItemId(null);
                           }}
-                                style={{
+                          style={{
                             padding: "8px 16px",
                             borderRadius: 8,
                             border: "1px solid #0066cc",
-                                  background: "#fff",
-                                  cursor: "pointer",
+                            background: "#fff",
+                            cursor: "pointer",
                             fontSize: 14,
                             color: "#0066cc",
                             fontWeight: 500,
-                                }}
-                              >
-                                复制
-                              </button>
-                              <button
+                          }}
+                        >
+                          复制
+                        </button>
+                        <button
                           onClick={() => {
                             setEndReasonItemId(selectedItemId);
                             setSelectedItemId(null);
                           }}
-                                style={{
+                          style={{
                             padding: "8px 16px",
                             borderRadius: 8,
                             border: "1px solid #ff9800",
-                                  background: "#fff",
-                                  cursor: "pointer",
+                            background: "#fff",
+                            cursor: "pointer",
                             fontSize: 14,
                             color: "#ff9800",
                             fontWeight: 500,
                           }}
                         >
                           缘尽
-                              </button>
-                              <button
+                        </button>
+                        <button
                           onClick={() => {
                             if (window.confirm(`确定要删除 "${selectedItem.name}" 吗？此操作不可撤销。`)) {
                               removeDaughterClothesItem(selectedItemId);
                               setSelectedItemId(null);
                             }
                           }}
-                                style={{
+                          style={{
                             padding: "8px 16px",
                             borderRadius: 8,
                             border: "1px solid #dc3545",
-                                  background: "#fff",
-                                  cursor: "pointer",
+                            background: "#fff",
+                            cursor: "pointer",
                             fontSize: 14,
                             color: "#dc3545",
                             fontWeight: 500,
-                                }}
-                              >
-                                删除
-                              </button>
+                          }}
+                        >
+                          删除
+                        </button>
                         <button
                           onClick={() => {
                             setSelectedItemId(null);
@@ -4042,7 +3519,7 @@ function App() {
                         </button>
                       </>
                     );
-                              })()}
+                  })()}
                   {/* 全选模式：只显示批量删除按钮 */}
                   {selectedItemIds.size > 0 && (
                     <>
@@ -4072,8 +3549,8 @@ function App() {
                       >
                         批量删除 ({selectedItemIds.size})
                       </button>
-                                </>
-                              )}
+                    </>
+                  )}
                 </div>
               )}
             </div>
