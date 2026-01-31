@@ -663,7 +663,7 @@ function App() {
 
   // Section 2a-1: Category State
   // `category` state determines whether the user is viewing clothes, beauty products, or daughter's clothes.
-  const [category, setCategory] = useState("clothes"); // clothes | beauty | daughterClothes
+  const [category, setCategory] = useState("clothes"); // clothes | daughterClothes | beauty | stats
 
   // Section 2b: Clothes Items State (Local Storage Persistence)
   // The `clothesItems` state is loaded from localStorage if present, otherwise starts as an empty array.
@@ -1345,6 +1345,121 @@ function App() {
     }, 0);
     return { count, totalPrice };
   }, [sortedDaughterClothesItems]);
+
+  // 数据统计页：数据源与维度选择
+  const [statsSource, setStatsSource] = useState("clothes"); // "clothes" | "daughterClothes"
+  const [statsDimension, setStatsDimension] = useState("mainCategory"); // "mainCategory" | "season" | "frequency" | "year" | "subCategory"
+  const [statsMainCategory, setStatsMainCategory] = useState("上衣"); // 用于小类维度时选择主分类
+
+  // 统计数据结构：每个维度下 { 维度值: { count, amount } }
+  const statsForClothes = useMemo(() => {
+    const items = clothesItems.filter((i) => !i.endReason);
+    const totalPrice = items.reduce((s, i) => s + (i.price != null ? Number(i.price) : 0), 0);
+    const byMain = {};
+    const bySeason = {};
+    const byFreq = {};
+    const byYear = {};
+    const bySubCategory = {}; // { 主分类: { 小类: { count, amount } } }
+    items.forEach((i) => {
+      const price = i.price != null ? Number(i.price) : 0;
+      const main = i.mainCategory || "其他";
+      if (!byMain[main]) byMain[main] = { count: 0, amount: 0 };
+      byMain[main].count += 1;
+      byMain[main].amount += price;
+      const season = mapSeason(i.season) || "其他";
+      if (!bySeason[season]) bySeason[season] = { count: 0, amount: 0 };
+      bySeason[season].count += 1;
+      bySeason[season].amount += price;
+      const freq = mapFrequency(i.frequency) || "其他";
+      if (!byFreq[freq]) byFreq[freq] = { count: 0, amount: 0 };
+      byFreq[freq].count += 1;
+      byFreq[freq].amount += price;
+      // 按年份统计
+      const year = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
+      if (!byYear[year]) byYear[year] = { count: 0, amount: 0 };
+      byYear[year].count += 1;
+      byYear[year].amount += price;
+      // 按小类统计（按主分类分组）
+      const sub = i.subCategory || "其他";
+      if (!bySubCategory[main]) bySubCategory[main] = {};
+      if (!bySubCategory[main][sub]) bySubCategory[main][sub] = { count: 0, amount: 0 };
+      bySubCategory[main][sub].count += 1;
+      bySubCategory[main][sub].amount += price;
+    });
+    return { count: items.length, totalPrice, byMainCategory: byMain, bySeason, byFrequency: byFreq, byYear, bySubCategory };
+  }, [clothesItems]);
+
+  const statsForDaughter = useMemo(() => {
+    const items = daughterClothesItems.filter((i) => !i.endReason);
+    const totalPrice = items.reduce((s, i) => s + (i.price != null ? Number(i.price) : 0), 0);
+    const byMain = {};
+    const bySeason = {};
+    const byFreq = {};
+    const byYear = {};
+    const bySubCategory = {}; // { 主分类: { 小类: { count, amount } } }
+    items.forEach((i) => {
+      const price = i.price != null ? Number(i.price) : 0;
+      const main = i.mainCategory || "其他";
+      if (!byMain[main]) byMain[main] = { count: 0, amount: 0 };
+      byMain[main].count += 1;
+      byMain[main].amount += price;
+      const season = mapSeason(i.season) || "其他";
+      if (!bySeason[season]) bySeason[season] = { count: 0, amount: 0 };
+      bySeason[season].count += 1;
+      bySeason[season].amount += price;
+      const freq = mapFrequency(i.frequency) || "其他";
+      if (!byFreq[freq]) byFreq[freq] = { count: 0, amount: 0 };
+      byFreq[freq].count += 1;
+      byFreq[freq].amount += price;
+      // 按年份统计
+      const year = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
+      if (!byYear[year]) byYear[year] = { count: 0, amount: 0 };
+      byYear[year].count += 1;
+      byYear[year].amount += price;
+      // 按小类统计（按主分类分组）
+      const sub = i.subCategory || "其他";
+      if (!bySubCategory[main]) bySubCategory[main] = {};
+      if (!bySubCategory[main][sub]) bySubCategory[main][sub] = { count: 0, amount: 0 };
+      bySubCategory[main][sub].count += 1;
+      bySubCategory[main][sub].amount += price;
+    });
+    return { count: items.length, totalPrice, byMainCategory: byMain, bySeason, byFrequency: byFreq, byYear, bySubCategory };
+  }, [daughterClothesItems]);
+
+  const currentStats = statsSource === "clothes" ? statsForClothes : statsForDaughter;
+  const dimensionLabel = useMemo(() => {
+    if (statsDimension === "mainCategory") return "主分类";
+    if (statsDimension === "season") return "季节";
+    if (statsDimension === "frequency") return "穿着频度";
+    if (statsDimension === "year") return "年份";
+    if (statsDimension === "subCategory") return `小类（${statsMainCategory}）`;
+    return "";
+  }, [statsDimension, statsMainCategory]);
+  const dimensionData = useMemo(() => {
+    let map;
+    if (statsDimension === "mainCategory") {
+      map = currentStats.byMainCategory;
+    } else if (statsDimension === "season") {
+      map = currentStats.bySeason;
+    } else if (statsDimension === "frequency") {
+      map = currentStats.byFrequency;
+    } else if (statsDimension === "year") {
+      map = currentStats.byYear;
+    } else if (statsDimension === "subCategory") {
+      map = currentStats.bySubCategory?.[statsMainCategory] || {};
+    } else {
+      map = {};
+    }
+    if (!map || typeof map !== "object") return [];
+    const arr = Object.entries(map)
+      .map(([name, v]) => ({ name, count: v.count, amount: v.amount }))
+      .sort((a, b) => b.count - a.count);
+    // 年份按时间顺序排序
+    if (statsDimension === "year") {
+      arr.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return arr;
+  }, [currentStats, statsDimension, statsMainCategory]);
 
   // Section 2e: Persist Clothes Items to Local Storage
   // Whenever `clothesItems` changes, save the updated array to localStorage.
@@ -2205,7 +2320,7 @@ function App() {
 
         <button
           onClick={() => {
-            setCategory("beauty");
+            setCategory("stats");
             setSelectedItemId(null);
             setSelectedItemIds(new Set());
           }}
@@ -2213,15 +2328,17 @@ function App() {
             padding: "10px 14px",
             borderRadius: 8,
             border: "1px solid #ccc",
-            background: category === "beauty" ? "#eee" : "white",
+            background: category === "stats" ? "#eee" : "white",
             cursor: "pointer",
             fontSize: "clamp(13px, 3.5vw, 15px)",
             flex: "1",
             minWidth: "90px"
           }}
         >
-          护肤/化妆
+          数据统计
         </button>
+
+        {/* 护肤/化妆 栏目暂时隐藏，后续优化时再展示 */}
       </div>
 
       <div
@@ -2233,7 +2350,194 @@ function App() {
           boxSizing: "border-box"
         }}
       >
-        {category === "clothes" ? (
+        {category === "stats" ? (
+          <div style={{ padding: "16px 0" }}>
+            <h2 style={{ marginTop: 0, marginBottom: 16 }}>数据统计</h2>
+
+            {/* 数据源切换：Grace / Skye */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 14, color: "#666", alignSelf: "center", marginRight: 4 }}>数据：</span>
+              <button
+                type="button"
+                onClick={() => setStatsSource("clothes")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  background: statsSource === "clothes" ? "#0066cc" : "#fff",
+                  color: statsSource === "clothes" ? "#fff" : "#333",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                Grace 的衣物
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatsSource("daughterClothes")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  background: statsSource === "daughterClothes" ? "#e65100" : "#fff",
+                  color: statsSource === "daughterClothes" ? "#fff" : "#333",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                Skye 的衣物
+              </button>
+            </div>
+
+            {/* 维度选择 */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 14, color: "#666", alignSelf: "center", marginRight: 4 }}>维度：</span>
+              <button
+                type="button"
+                onClick={() => setStatsDimension("mainCategory")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  background: statsDimension === "mainCategory" ? "#333" : "#fff",
+                  color: statsDimension === "mainCategory" ? "#fff" : "#333",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                主分类
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatsDimension("subCategory")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  background: statsDimension === "subCategory" ? "#333" : "#fff",
+                  color: statsDimension === "subCategory" ? "#fff" : "#333",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                小类
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatsDimension("year")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  background: statsDimension === "year" ? "#333" : "#fff",
+                  color: statsDimension === "year" ? "#fff" : "#333",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                年份
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatsDimension("season")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  background: statsDimension === "season" ? "#333" : "#fff",
+                  color: statsDimension === "season" ? "#fff" : "#333",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                季节
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatsDimension("frequency")}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  background: statsDimension === "frequency" ? "#333" : "#fff",
+                  color: statsDimension === "frequency" ? "#fff" : "#333",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                穿着频度
+              </button>
+            </div>
+
+            {/* 小类维度时：选择主分类 */}
+            {statsDimension === "subCategory" && (
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>选择主分类：</span>
+                <select
+                  value={statsMainCategory}
+                  onChange={(e) => setStatsMainCategory(e.target.value)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #ccc",
+                    fontSize: 14,
+                    background: "#fff",
+                  }}
+                >
+                  {mainCategories.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 汇总卡片：件数、总金额 */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
+              <div style={{ padding: 16, background: statsSource === "clothes" ? "#f0f7ff" : "#fff5f0", borderRadius: 10, border: statsSource === "clothes" ? "1px solid #d0e7ff" : "1px solid #ffd0c0", textAlign: "center" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: statsSource === "clothes" ? "#0066cc" : "#e65100" }}>{currentStats.count}</div>
+                <div style={{ fontSize: 13, color: "#666" }}>件（在用）</div>
+              </div>
+              <div style={{ padding: 16, background: "#f0fff4", borderRadius: 10, border: "1px solid #c6e8c9", textAlign: "center" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "#28a745" }}>¥{currentStats.totalPrice.toFixed(2)}</div>
+                <div style={{ fontSize: 13, color: "#666" }}>总金额</div>
+              </div>
+            </div>
+
+            {/* 按所选维度展示：名称、件数、占比、金额、条形图 */}
+            {currentStats.count > 0 && (
+              <section>
+                <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "#555" }}>按{dimensionLabel}</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {dimensionData.map(({ name, count, amount }) => {
+                    const pct = currentStats.count ? ((count / currentStats.count) * 100).toFixed(1) : "0";
+                    const amountPct = currentStats.totalPrice ? ((amount / currentStats.totalPrice) * 100).toFixed(1) : "0";
+                    return (
+                      <div key={name} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <span style={{ minWidth: 72, fontSize: 13, fontWeight: 500 }}>{name}</span>
+                        <div style={{ flex: "1 1 120px", minWidth: 80, height: 22, background: "#eee", borderRadius: 4, overflow: "hidden" }}>
+                          <div
+                            style={{
+                              width: `${currentStats.count ? (count / currentStats.count) * 100 : 0}%`,
+                              height: "100%",
+                              background: statsSource === "clothes" ? "#0066cc" : "#e65100",
+                              borderRadius: 4,
+                            }}
+                          />
+                        </div>
+                        <span style={{ fontSize: 13, color: "#333", whiteSpace: "nowrap" }}>
+                          {count} 件（{pct}%）
+                        </span>
+                        <span style={{ fontSize: 13, color: "#28a745", fontWeight: 500, whiteSpace: "nowrap" }}>
+                          ¥{amount.toFixed(2)}（{amountPct}%）
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+        ) : category === "clothes" ? (
           <div style={{ paddingBottom: sortedClothesItems.length > 0 ? "80px" : "0" }}>
             {/* 固定：标题 + 筛选 + 编辑栏 */}
             <div
