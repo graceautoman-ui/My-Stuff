@@ -888,7 +888,7 @@ function App() {
   );
 
   // Section 2d-4: Available Years Memoization
-  // Extracts all unique years from purchaseDate fields in both clothesItems and daughterClothesItems.
+  // Extracts years from purchaseDate. Years >= 2024 shown separately; years < 2024 grouped as "2024年以前".
 
   const availableYears = useMemo(() => {
     const yearSet = new Set();
@@ -896,7 +896,6 @@ function App() {
     // Extract years from clothesItems
     clothesItems.forEach(item => {
       if (item.purchaseDate) {
-        // purchaseDate format: "YYYY-MM" or "YYYY"
         const year = item.purchaseDate.split('-')[0];
         if (year && year.length === 4) {
           yearSet.add(year);
@@ -914,8 +913,12 @@ function App() {
       }
     });
     
-    // Sort years in descending order (newest first)
-    return Array.from(yearSet).sort((a, b) => b.localeCompare(a));
+    const years = Array.from(yearSet).sort((a, b) => b.localeCompare(a));
+    const recentYears = years.filter((y) => y >= "2024");
+    const hasBefore2024 = years.some((y) => y < "2024");
+    const result = [...recentYears];
+    if (hasBefore2024) result.push("before2024");
+    return result;
   }, [clothesItems, daughterClothesItems]);
 
   // Section 2d-3-1: Years and Months for Date Picker
@@ -1192,6 +1195,7 @@ function App() {
       filtered = filtered.filter((item) => {
         if (!item.purchaseDate) return false;
         const year = item.purchaseDate.split('-')[0];
+        if (filterYear === "before2024") return year < "2024";
         return year === filterYear;
       });
     }
@@ -1283,6 +1287,7 @@ function App() {
       filtered = filtered.filter((item) => {
         if (!item.purchaseDate) return false;
         const year = item.purchaseDate.split('-')[0];
+        if (filterYear === "before2024") return year < "2024";
         return year === filterYear;
       });
     }
@@ -1392,16 +1397,21 @@ function App() {
   const [statsDimension, setStatsDimension] = useState("mainCategory"); // "mainCategory" | "season" | "frequency" | "subCategory"
   const [statsMainCategory, setStatsMainCategory] = useState("上衣"); // 用于小类维度时选择主分类
 
-  // 获取可用年份列表（用于年份筛选下拉框）
+  // 获取可用年份列表（用于年份筛选下拉框），2024年以前归为 before2024
   const statsAvailableYears = useMemo(() => {
     const items = statsSource === "clothes" ? clothesItems : daughterClothesItems;
-    const years = new Set();
+    const yearSet = new Set();
     items.filter((i) => !i.endReason).forEach((i) => {
       if (i.purchaseDate) {
-        years.add(i.purchaseDate.substring(0, 4));
+        yearSet.add(i.purchaseDate.substring(0, 4));
       }
     });
-    return Array.from(years).sort();
+    const years = Array.from(yearSet).sort((a, b) => b.localeCompare(a));
+    const recentYears = years.filter((y) => y >= "2024");
+    const hasBefore2024 = years.some((y) => y < "2024");
+    const result = [...recentYears];
+    if (hasBefore2024) result.push("before2024");
+    return result;
   }, [statsSource, clothesItems, daughterClothesItems]);
 
   // 辅助函数：计算一组 items 的各维度统计
@@ -1435,15 +1445,14 @@ function App() {
     return { count: items.length, totalPrice, byMainCategory: byMain, bySeason, byFrequency: byFreq, bySubCategory };
   };
 
-  // 统计数据结构：包含总体统计和按年份分组的统计
+  // 统计数据结构：包含总体统计和按年份分组的统计。2024年（不含）以前的年份统一归为"2024年以前"
   const statsForClothes = useMemo(() => {
     const allItems = clothesItems.filter((i) => !i.endReason);
-    // 总体统计
     const overall = computeDimensionStats(allItems);
-    // 按年份分组统计
     const byYear = {};
     allItems.forEach((i) => {
-      const year = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
+      const rawYear = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
+      const year = rawYear !== "未知" && rawYear < "2024" ? "before2024" : rawYear;
       if (!byYear[year]) byYear[year] = [];
       byYear[year].push(i);
     });
@@ -1456,12 +1465,11 @@ function App() {
 
   const statsForDaughter = useMemo(() => {
     const allItems = daughterClothesItems.filter((i) => !i.endReason);
-    // 总体统计
     const overall = computeDimensionStats(allItems);
-    // 按年份分组统计
     const byYear = {};
     allItems.forEach((i) => {
-      const year = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
+      const rawYear = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
+      const year = rawYear !== "未知" && rawYear < "2024" ? "before2024" : rawYear;
       if (!byYear[year]) byYear[year] = [];
       byYear[year].push(i);
     });
@@ -1510,10 +1518,15 @@ function App() {
   }, [currentStats, statsDimension, statsMainCategory]);
 
   // 当不选择年份时，生成跨年份对比数据结构
-  // { years: ["2024", "2023", ...], dimensionValues: ["上衣", ...], dataMap: { "上衣": { "2024": {count, amount}, ... } }, yearStats: { "2024": {count, totalPrice}, ... } }
+  // { years: ["2025", "2024", "before2024"], ... } 年份倒序，"2024年以前"放最后
   const crossYearComparisonData = useMemo(() => {
     if (statsYear) return null; // 选择了具体年份时不需要
-    const years = Object.keys(allStats.byYearStats || {}).sort().reverse(); // 按年份倒序
+    const rawYears = Object.keys(allStats.byYearStats || {});
+    const years = rawYears.sort((a, b) => {
+      if (a === "before2024") return 1; // before2024 放最后
+      if (b === "before2024") return -1;
+      return b.localeCompare(a); // 倒序
+    });
     if (years.length === 0) return null;
     
     // 收集所有维度值
@@ -1579,19 +1592,24 @@ function App() {
     if (statsDimension === "subCategory") {
       const items = statsSource === "clothes" ? clothesItems : daughterClothesItems;
       let filtered = items.filter((i) => !i.endReason && i.mainCategory === statsMainCategory);
-      // 如果选择了具体年份，进一步筛选
       if (statsYear) {
-        filtered = filtered.filter((i) => i.purchaseDate && i.purchaseDate.substring(0, 4) === statsYear);
+        if (statsYear === "before2024") {
+          filtered = filtered.filter((i) => i.purchaseDate && i.purchaseDate.substring(0, 4) < "2024");
+        } else {
+          filtered = filtered.filter((i) => i.purchaseDate && i.purchaseDate.substring(0, 4) === statsYear);
+        }
       }
       const count = filtered.length;
       const totalPrice = filtered.reduce((s, i) => s + (i.price != null ? Number(i.price) : 0), 0);
-      return { count, totalPrice, label: `${statsMainCategory}${statsYear ? `·${statsYear}年` : ""}` };
+      const yearLabel = statsYear === "before2024" ? "2024年以前" : (statsYear ? `${statsYear}年` : "");
+      return { count, totalPrice, label: `${statsMainCategory}${yearLabel ? `·${yearLabel}` : ""}` };
     }
     // 其他维度使用 currentStats
+    const yearLabel = statsYear === "before2024" ? "2024年以前" : (statsYear ? `${statsYear}年` : "全部");
     return { 
       count: currentStats.count, 
       totalPrice: currentStats.totalPrice, 
-      label: statsYear ? `${statsYear}年` : "全部" 
+      label: statsYear ? yearLabel : "全部" 
     };
   }, [statsDimension, statsMainCategory, statsYear, statsSource, clothesItems, daughterClothesItems, currentStats]);
 
@@ -2232,6 +2250,46 @@ function App() {
       maxWidth: "100%",
       boxSizing: "border-box"
     }}>
+      {/* 移动端适配样式 */}
+      <style>{`
+        @media (max-width: 480px) {
+          .stats-table {
+            font-size: 11px !important;
+            min-width: 380px !important;
+          }
+          .stats-table th,
+          .stats-table td {
+            padding: 6px 4px !important;
+          }
+          .stats-table th {
+            min-width: 60px !important;
+          }
+          .stats-table th:nth-child(n+3) {
+            min-width: 85px !important;
+          }
+          .stats-card-grid {
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 8px !important;
+          }
+          .stats-card {
+            padding: 10px !important;
+          }
+          .stats-card-value {
+            font-size: 18px !important;
+          }
+          .stats-card-label {
+            font-size: 11px !important;
+          }
+          .stats-btn {
+            padding: 10px 10px !important;
+            font-size: 13px !important;
+            min-height: 44px;
+          }
+          .stats-section {
+            padding-bottom: env(safe-area-inset-bottom, 12px) !important;
+          }
+        }
+      `}</style>
       <div style={{ 
         display: "flex", 
         justifyContent: "space-between", 
@@ -2473,7 +2531,7 @@ function App() {
         }}
       >
         {category === "stats" ? (
-          <div style={{ padding: "16px 0" }}>
+          <div className="stats-section" style={{ padding: "16px 0" }}>
             <h2 style={{ marginTop: 0, marginBottom: 16 }}>数据统计</h2>
 
             {/* 数据源切换：Grace / Skye */}
@@ -2481,6 +2539,7 @@ function App() {
               <span style={{ fontSize: 14, color: "#666", alignSelf: "center", marginRight: 4 }}>数据：</span>
               <button
                 type="button"
+                className="stats-btn"
                 onClick={() => setStatsSource("clothes")}
                 style={{
                   padding: "8px 14px",
@@ -2496,6 +2555,7 @@ function App() {
               </button>
               <button
                 type="button"
+                className="stats-btn"
                 onClick={() => setStatsSource("daughterClothes")}
                 style={{
                   padding: "8px 14px",
@@ -2527,12 +2587,12 @@ function App() {
               >
                 <option value="">全部年份</option>
                 {statsAvailableYears.map((year) => (
-                  <option key={year} value={year}>{year}年</option>
+                  <option key={year} value={year}>{year === "before2024" ? "2024年以前" : `${year}年`}</option>
                 ))}
               </select>
               {statsYear && (
                 <span style={{ fontSize: 13, color: "#0066cc" }}>
-                  已筛选：{statsYear}年
+                  已筛选：{statsYear === "before2024" ? "2024年以前" : `${statsYear}年`}
                 </span>
               )}
             </div>
@@ -2542,6 +2602,7 @@ function App() {
               <span style={{ fontSize: 14, color: "#666", alignSelf: "center", marginRight: 4 }}>维度：</span>
               <button
                 type="button"
+                className="stats-btn"
                 onClick={() => setStatsDimension("mainCategory")}
                 style={{
                   padding: "8px 14px",
@@ -2557,6 +2618,7 @@ function App() {
               </button>
               <button
                 type="button"
+                className="stats-btn"
                 onClick={() => setStatsDimension("subCategory")}
                 style={{
                   padding: "8px 14px",
@@ -2572,6 +2634,7 @@ function App() {
               </button>
               <button
                 type="button"
+                className="stats-btn"
                 onClick={() => setStatsDimension("season")}
                 style={{
                   padding: "8px 14px",
@@ -2587,6 +2650,7 @@ function App() {
               </button>
               <button
                 type="button"
+                className="stats-btn"
                 onClick={() => setStatsDimension("frequency")}
                 style={{
                   padding: "8px 14px",
@@ -2631,22 +2695,22 @@ function App() {
               const isFiltered = statsDimension === "subCategory" || statsYear; // 是否有筛选
               const avgPrice = displayStats.count > 0 ? Math.round(displayStats.totalPrice / displayStats.count) : 0;
               return (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
-                  <div style={{ padding: 16, background: statsSource === "clothes" ? "#f0f7ff" : "#fff5f0", borderRadius: 10, border: statsSource === "clothes" ? "1px solid #d0e7ff" : "1px solid #ffd0c0", textAlign: "center" }}>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: statsSource === "clothes" ? "#0066cc" : "#e65100" }}>
+                <div className="stats-card-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
+                  <div className="stats-card" style={{ padding: 16, background: statsSource === "clothes" ? "#f0f7ff" : "#fff5f0", borderRadius: 10, border: statsSource === "clothes" ? "1px solid #d0e7ff" : "1px solid #ffd0c0", textAlign: "center" }}>
+                    <div className="stats-card-value" style={{ fontSize: 24, fontWeight: 700, color: statsSource === "clothes" ? "#0066cc" : "#e65100" }}>
                       {displayStats.count} <span style={{ fontSize: 14, fontWeight: 500 }}>件</span>
                     </div>
-                    {isFiltered && <div style={{ fontSize: 13, color: "#888" }}>占比 {countPct}%</div>}
-                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>（{displayStats.label}）</div>
+                    {isFiltered && <div className="stats-card-label" style={{ fontSize: 13, color: "#888" }}>占比 {countPct}%</div>}
+                    <div className="stats-card-label" style={{ fontSize: 12, color: "#666", marginTop: 4 }}>（{displayStats.label}）</div>
                   </div>
-                  <div style={{ padding: 16, background: "#f0fff4", borderRadius: 10, border: "1px solid #c6e8c9", textAlign: "center" }}>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: "#28a745" }}>¥{displayStats.totalPrice.toFixed(0)}</div>
-                    {isFiltered && <div style={{ fontSize: 13, color: "#888" }}>占比 {amountPct}%</div>}
-                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>（{displayStats.label}）</div>
+                  <div className="stats-card" style={{ padding: 16, background: "#f0fff4", borderRadius: 10, border: "1px solid #c6e8c9", textAlign: "center" }}>
+                    <div className="stats-card-value" style={{ fontSize: 24, fontWeight: 700, color: "#28a745" }}>¥{displayStats.totalPrice.toFixed(0)}</div>
+                    {isFiltered && <div className="stats-card-label" style={{ fontSize: 13, color: "#888" }}>占比 {amountPct}%</div>}
+                    <div className="stats-card-label" style={{ fontSize: 12, color: "#666", marginTop: 4 }}>（{displayStats.label}）</div>
                   </div>
-                  <div style={{ padding: 16, background: "#fff8e1", borderRadius: 10, border: "1px solid #ffe082", textAlign: "center" }}>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: "#f57c00" }}>¥{avgPrice}</div>
-                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>件均</div>
+                  <div className="stats-card" style={{ padding: 16, background: "#fff8e1", borderRadius: 10, border: "1px solid #ffe082", textAlign: "center" }}>
+                    <div className="stats-card-value" style={{ fontSize: 24, fontWeight: 700, color: "#f57c00" }}>¥{avgPrice}</div>
+                    <div className="stats-card-label" style={{ fontSize: 12, color: "#666", marginTop: 4 }}>件均</div>
                   </div>
                 </div>
               );
@@ -2723,8 +2787,8 @@ function App() {
                     };
                     
                     return (
-                      <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 500 }}>
+                      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                        <table className="stats-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 500 }}>
                           {/* 表头：维度值 + 合计 + 各年份 */}
                           <thead>
                             <tr style={{ background: "#f5f5f5" }}>
@@ -2737,7 +2801,7 @@ function App() {
                                   <th key={year} style={{ padding: "10px 8px", textAlign: "center", borderBottom: "2px solid #ddd", minWidth: 120 }}>
                                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                                       <div style={{ width: 10, height: 10, borderRadius: 2, background: yearColors[idx % yearColors.length] }} />
-                                      <span>{year}年</span>
+                                      <span>{year === "before2024" ? "2024年以前" : `${year}年`}</span>
                                     </div>
                                   </th>
                                 );
@@ -2868,7 +2932,7 @@ function App() {
                 <option value="">全部年份</option>
                 {availableYears.map((year) => (
                   <option key={year} value={year}>
-                    {year}年
+                    {year === "before2024" ? "2024年以前" : `${year}年`}
                   </option>
                 ))}
               </select>
@@ -3582,7 +3646,7 @@ function App() {
                 <option value="">全部年份</option>
                 {availableYears.map((year) => (
                   <option key={year} value={year}>
-                    {year}年
+                    {year === "before2024" ? "2024年以前" : `${year}年`}
                   </option>
                 ))}
               </select>
