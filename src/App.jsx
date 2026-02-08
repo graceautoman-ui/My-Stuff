@@ -11,8 +11,63 @@ import {
   mergeItems,
   dbToLocalItem,
 } from "./lib/syncUtils";
+import { uploadClothesImages, getDisplayImageUrl, uploadClothesImageUnlinked } from "./lib/imageUpload";
 
 const STORAGE_KEY = "grace_stuff_clothes_v1";
+
+/** 展示单张衣物照片（私有 bucket 用 Signed URL） */
+function ClothesPhoto({ supabase, url, style = {}, alt = "" }) {
+  const [displayUrl, setDisplayUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!url || !supabase) {
+      setDisplayUrl(null);
+      setFailed(false);
+      return;
+    }
+    setFailed(false);
+    let cancelled = false;
+    getDisplayImageUrl(supabase, url).then((signed) => {
+      if (!cancelled) setDisplayUrl(signed);
+    });
+    return () => { cancelled = true; };
+  }, [supabase, url]);
+  const placeholderStyle = {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    background: "#eee",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 18,
+    flexShrink: 0,
+    ...style,
+  };
+  if (!url) {
+    return (
+      <div style={placeholderStyle} title="暂无照片">
+        📷
+      </div>
+    );
+  }
+  if (!displayUrl || failed) {
+    return (
+      <div style={placeholderStyle} title="加载中">
+        📷
+      </div>
+    );
+  }
+  return (
+    <img
+      src={displayUrl}
+      alt={alt}
+      loading="lazy"
+      style={{ objectFit: "cover", borderRadius: 8, ...style }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
 const STORAGE_KEY_DAUGHTER = "grace_stuff_daughter_clothes_v1";
 
 // Section 2: Main App Component Function
@@ -665,6 +720,23 @@ function App() {
   // `category` state determines whether the user is viewing clothes, beauty products, or daughter's clothes.
   const [category, setCategory] = useState("clothes"); // clothes | daughterClothes | beauty | stats
 
+  // 批量补照片：独立视图与待关联列表。每项 { id, url?, filename, status: "uploaded"|"linked"|"error", target: null|{ source, itemId, itemName }, file?, errorMessage? }
+  const [showBatchPhotoView, setShowBatchPhotoView] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState([]);
+  const [selectedBatchFiles, setSelectedBatchFiles] = useState([]); // 已选未上传的 File[]
+  const [batchUploading, setBatchUploading] = useState(false);
+  const [batchLinkSelections, setBatchLinkSelections] = useState({}); // { [pendingId]: { source, itemId, searchQuery? } }
+  const batchPhotoInputRef = useRef(null);
+  // 编辑衣物时「从已上传未关联的照片中选择」弹层：{ type: "clothes"|"daughter", itemId }，选中项用于追加到当前编辑条目
+  const [showUnlinkedPhotoPicker, setShowUnlinkedPhotoPicker] = useState(null);
+  const [unlinkedPickerSelectedIds, setUnlinkedPickerSelectedIds] = useState(new Set());
+
+  // 已批量上传但未关联的照片（可供编辑页选择添加）
+  const unlinkedBatchPhotos = useMemo(
+    () => pendingUploads.filter((p) => p.status === "uploaded" && !p.target && p.url),
+    [pendingUploads]
+  );
+
   // Section 2b: Clothes Items State (Local Storage Persistence)
   // The `clothesItems` state is loaded from localStorage if present, otherwise starts as an empty array.
   // This data persists clothing items using the defined `STORAGE_KEY`.
@@ -806,6 +878,14 @@ function App() {
   const [cPrice, setCPrice] = useState("");
   const [cFrequency, setCFrequency] = useState("偶尔");
   const [cColor, setCColor] = useState("黑色");
+  const [cOccasionTags, setCOccasionTags] = useState([]); // 场合（多选）
+  const [cWearingLayer, setCWearingLayer] = useState(""); // 穿着层级，单选，空表示不限制
+  const [cMaterial, setCMaterial] = useState(""); // 材质，单选，空表示不限制
+  const [cStyleTags, setCStyleTags] = useState([]); // 风格，多选
+  const [cFit, setCFit] = useState(""); // 版型，单选，空表示不限制
+  const [pendingImageFiles, setPendingImageFiles] = useState([]); // 新增衣物时已选待上传的照片（File[]）
+  const photoInputRef = useRef(null);
+  const photoInputRefDaughter = useRef(null);
 
   // Section 2c-1: Edit State
   // Tracks which item is being edited (null means no item is being edited).
@@ -822,6 +902,7 @@ function App() {
 
   const [filterYear, setFilterYear] = useState(""); // "" | "YYYY"
   const [filterSeason, setFilterSeason] = useState(""); // "" | season
+  const [filterOccasion, setFilterOccasion] = useState(""); // "" | occasion tag
   const [filterMainCategory, setFilterMainCategory] = useState(""); // "" | mainCategory
   const [filterSubCategory, setFilterSubCategory] = useState(""); // "" | subCategory
   const [searchQuery, setSearchQuery] = useState(""); // 按名称模糊搜索
@@ -839,6 +920,36 @@ function App() {
 
   // Section 2d: Clothes Categories Definition
   // Main categories and their subcategories for clothing classification.
+
+  // 场合可选值（与推荐请求 occasion 一致）
+  const occasionOptions = useMemo(
+    () => ["通勤", "居家", "运动", "约会", "度假", "其他"],
+    []
+  );
+
+  // 穿着层级可选值
+  const wearingLayerOptions = useMemo(
+    () => ["内穿", "内外皆可", "外穿"],
+    []
+  );
+
+  // 材质可选值
+  const materialOptions = useMemo(
+    () => ["纯棉", "羊毛", "羊绒", "聚酯纤维", "混纺", "牛仔", "真丝", "皮革", "羽绒", "针织", "亚麻"],
+    []
+  );
+
+  // 风格可选值（多选）
+  const styleTagOptions = useMemo(
+    () => ["简约", "复古", "中性", "文艺", "运动", "通勤", "优雅", "知性"],
+    []
+  );
+
+  // 版型可选值（单选）
+  const fitOptions = useMemo(
+    () => ["宽松", "合身", "修身"],
+    []
+  );
 
   const clothesCategories = useMemo(
     () => ({
@@ -1207,6 +1318,11 @@ function App() {
         return itemSeason === filterSeason;
       });
     }
+
+    // Filter by occasion if set
+    if (filterOccasion) {
+      filtered = filtered.filter((item) => Array.isArray(item.occasionTags) && item.occasionTags.includes(filterOccasion));
+    }
     
     // Filter by main category if set
     if (filterMainCategory) {
@@ -1273,7 +1389,7 @@ function App() {
       });
     }
     return result;
-  }, [clothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory, searchQuery, sortField, sortDirection]);
+  }, [clothesItems, filterYear, filterSeason, filterOccasion, filterMainCategory, filterSubCategory, searchQuery, sortField, sortDirection]);
 
   // Section 2e-0-1: Sorted and Filtered Daughter Clothes Items
   // Sorts daughter clothes items: items with endReason go to the end.
@@ -1299,6 +1415,11 @@ function App() {
         return itemSeason === filterSeason;
       });
     }
+
+    // Filter by occasion if set
+    if (filterOccasion) {
+      filtered = filtered.filter((item) => Array.isArray(item.occasionTags) && item.occasionTags.includes(filterOccasion));
+    }
     
     // Filter by main category if set
     if (filterMainCategory) {
@@ -1365,7 +1486,7 @@ function App() {
       });
     }
     return result;
-  }, [daughterClothesItems, filterYear, filterSeason, filterMainCategory, filterSubCategory, searchQuery, sortField, sortDirection]);
+  }, [daughterClothesItems, filterYear, filterSeason, filterOccasion, filterMainCategory, filterSubCategory, searchQuery, sortField, sortDirection]);
 
   // Section 2e-0-2: Filter Statistics for Clothes Items
   // Calculates statistics for filtered clothes items: count and total price.
@@ -1391,11 +1512,14 @@ function App() {
     return { count, totalPrice };
   }, [sortedDaughterClothesItems]);
 
-  // 数据统计页：数据源、年份筛选、维度选择
+  // 数据统计页：数据源、年份筛选、场合筛选、维度选择
   const [statsSource, setStatsSource] = useState("clothes"); // "clothes" | "daughterClothes"
   const [statsYear, setStatsYear] = useState(""); // "" 表示全部年份，"YYYY" 表示具体年份
+  const [statsOccasion, setStatsOccasion] = useState(""); // "" 表示全部场合，否则为场合标签
   const [statsDimension, setStatsDimension] = useState("mainCategory"); // "mainCategory" | "season" | "frequency" | "subCategory"
   const [statsMainCategory, setStatsMainCategory] = useState("上衣"); // 用于小类维度时选择主分类
+  const [statsSubCategory, setStatsSubCategory] = useState(""); // 小类维度下再选小类，"" 表示全部小类
+  const [showStatsPhotos, setShowStatsPhotos] = useState(false); // 是否展示「符合筛选条件的衣物照片」
 
   // 获取可用年份列表（用于年份筛选下拉框），2024年以前归为 before2024
   const statsAvailableYears = useMemo(() => {
@@ -1445,9 +1569,26 @@ function App() {
     return { count: items.length, totalPrice, byMainCategory: byMain, bySeason, byFrequency: byFreq, bySubCategory };
   };
 
+  // 数据统计用：按数据源和场合筛选后的条目（无缘尽）
+  const statsItems = useMemo(() => {
+    let items = statsSource === "clothes" ? clothesItems : daughterClothesItems;
+    items = items.filter((i) => !i.endReason);
+    if (statsOccasion) {
+      items = items.filter((i) => Array.isArray(i.occasionTags) && i.occasionTags.includes(statsOccasion));
+    }
+    return items;
+  }, [statsSource, statsOccasion, clothesItems, daughterClothesItems]);
+
+  // 小类维度下，当前主分类在数据中实际出现的小类列表（用于「选择小类」下拉）
+  const statsSubCategoryOptions = useMemo(() => {
+    const items = statsItems.filter((i) => i.mainCategory === statsMainCategory);
+    const subs = [...new Set(items.map((i) => i.subCategory).filter(Boolean))];
+    return subs.sort((a, b) => (a || "").localeCompare(b || ""));
+  }, [statsItems, statsMainCategory]);
+
   // 统计数据结构：包含总体统计和按年份分组的统计。2024年（不含）以前的年份统一归为"2024年以前"
-  const statsForClothes = useMemo(() => {
-    const allItems = clothesItems.filter((i) => !i.endReason);
+  const allStats = useMemo(() => {
+    const allItems = statsItems;
     const overall = computeDimensionStats(allItems);
     const byYear = {};
     allItems.forEach((i) => {
@@ -1461,26 +1602,7 @@ function App() {
       byYearStats[year] = computeDimensionStats(items);
     });
     return { ...overall, byYearStats };
-  }, [clothesItems]);
-
-  const statsForDaughter = useMemo(() => {
-    const allItems = daughterClothesItems.filter((i) => !i.endReason);
-    const overall = computeDimensionStats(allItems);
-    const byYear = {};
-    allItems.forEach((i) => {
-      const rawYear = i.purchaseDate ? i.purchaseDate.substring(0, 4) : "未知";
-      const year = rawYear !== "未知" && rawYear < "2024" ? "before2024" : rawYear;
-      if (!byYear[year]) byYear[year] = [];
-      byYear[year].push(i);
-    });
-    const byYearStats = {};
-    Object.entries(byYear).forEach(([year, items]) => {
-      byYearStats[year] = computeDimensionStats(items);
-    });
-    return { ...overall, byYearStats };
-  }, [daughterClothesItems]);
-
-  const allStats = statsSource === "clothes" ? statsForClothes : statsForDaughter;
+  }, [statsItems]);
   // 当选择具体年份时，使用该年份的统计；否则使用总体统计（用于汇总卡片）
   const currentStats = statsYear ? (allStats.byYearStats?.[statsYear] || { count: 0, totalPrice: 0, byMainCategory: {}, bySeason: {}, byFrequency: {}, bySubCategory: {} }) : allStats;
   
@@ -1512,10 +1634,12 @@ function App() {
       .sort((a, b) => b.count - a.count);
   };
 
-  // 当选择具体年份时的维度数据
+  // 当选择具体年份时的维度数据；小类维度下若选了具体小类则只返回该小类
   const dimensionData = useMemo(() => {
-    return extractDimensionData(currentStats, statsDimension, statsMainCategory);
-  }, [currentStats, statsDimension, statsMainCategory]);
+    const data = extractDimensionData(currentStats, statsDimension, statsMainCategory);
+    if (statsDimension === "subCategory" && statsSubCategory) return data.filter((d) => d.name === statsSubCategory);
+    return data;
+  }, [currentStats, statsDimension, statsMainCategory, statsSubCategory]);
 
   // 当不选择年份时，生成跨年份对比数据结构
   // { years: ["2025", "2024", "before2024"], ... } 年份倒序，"2024年以前"放最后
@@ -1535,7 +1659,7 @@ function App() {
       const yearData = extractDimensionData(allStats.byYearStats[year], statsDimension, statsMainCategory);
       yearData.forEach(({ name }) => dimensionValuesSet.add(name));
     });
-    const dimensionValues = Array.from(dimensionValuesSet);
+    let dimensionValues = Array.from(dimensionValuesSet);
     
     // 构建数据映射 { 维度值: { 年份: { count, amount } } }
     const dataMap = {};
@@ -1560,15 +1684,20 @@ function App() {
       const totalB = years.reduce((sum, y) => sum + (dataMap[b][y]?.count || 0), 0);
       return totalB - totalA;
     });
+
+    if (statsDimension === "subCategory" && statsSubCategory) {
+      dimensionValues = dimensionValues.filter((v) => v === statsSubCategory);
+      if (dimensionValues.length === 0) dimensionValues = [statsSubCategory];
+    }
     
-    // 年份统计（当选择小类维度时，只统计选中主分类的数据）
+    // 年份统计（当选择小类维度时，只统计选中主分类的数据；若选了小类则只统计该小类）
     const yearStats = {};
     if (statsDimension === "subCategory") {
-      // 小类维度：按主分类筛选后计算年份统计
       years.forEach((year) => {
         const yearDimData = extractDimensionData(allStats.byYearStats[year], statsDimension, statsMainCategory);
-        const count = yearDimData.reduce((sum, d) => sum + d.count, 0);
-        const totalPrice = yearDimData.reduce((sum, d) => sum + d.amount, 0);
+        const toSum = statsSubCategory ? yearDimData.filter((d) => d.name === statsSubCategory) : yearDimData;
+        const count = toSum.reduce((sum, d) => sum + d.count, 0);
+        const totalPrice = toSum.reduce((sum, d) => sum + d.amount, 0);
         yearStats[year] = { count, totalPrice };
       });
     } else {
@@ -1584,14 +1713,14 @@ function App() {
     });
     
     return { years, dimensionValues, dataMap, yearStats, maxCountPerYear };
-  }, [allStats, statsYear, statsDimension, statsMainCategory]);
+  }, [allStats, statsYear, statsDimension, statsMainCategory, statsSubCategory]);
 
-  // 计算显示用的统计数据（当选择小类维度时，只统计选中主分类的数据）
+  // 计算显示用的统计数据（当选择小类维度时，只统计选中主分类的数据；已含场合筛选）
   const displayStats = useMemo(() => {
-    // 当选择小类维度时，只统计选中主分类的数据
+    // 当选择小类维度时，只统计选中主分类（及可选小类）的数据（基于 statsItems，已按场合筛选）
     if (statsDimension === "subCategory") {
-      const items = statsSource === "clothes" ? clothesItems : daughterClothesItems;
-      let filtered = items.filter((i) => !i.endReason && i.mainCategory === statsMainCategory);
+      let filtered = statsItems.filter((i) => i.mainCategory === statsMainCategory);
+      if (statsSubCategory) filtered = filtered.filter((i) => i.subCategory === statsSubCategory);
       if (statsYear) {
         if (statsYear === "before2024") {
           filtered = filtered.filter((i) => i.purchaseDate && i.purchaseDate.substring(0, 4) < "2024");
@@ -1602,7 +1731,8 @@ function App() {
       const count = filtered.length;
       const totalPrice = filtered.reduce((s, i) => s + (i.price != null ? Number(i.price) : 0), 0);
       const yearLabel = statsYear === "before2024" ? "2024年以前" : (statsYear ? `${statsYear}年` : "");
-      return { count, totalPrice, label: `${statsMainCategory}${yearLabel ? `·${yearLabel}` : ""}` };
+      const subLabel = statsSubCategory ? `·${statsSubCategory}` : "";
+      return { count, totalPrice, label: `${statsMainCategory}${subLabel}${yearLabel ? `·${yearLabel}` : ""}` };
     }
     // 其他维度使用 currentStats
     const yearLabel = statsYear === "before2024" ? "2024年以前" : (statsYear ? `${statsYear}年` : "全部");
@@ -1611,7 +1741,33 @@ function App() {
       totalPrice: currentStats.totalPrice, 
       label: statsYear ? yearLabel : "全部" 
     };
-  }, [statsDimension, statsMainCategory, statsYear, statsSource, clothesItems, daughterClothesItems, currentStats]);
+  }, [statsDimension, statsMainCategory, statsSubCategory, statsYear, statsItems, currentStats]);
+
+  // 符合当前统计筛选条件的条目（用于照片查看），与当前维度筛选一致
+  const statsItemsFilteredByYear = useMemo(() => {
+    let items = statsItems;
+    if (statsYear) {
+      if (statsYear === "before2024") {
+        items = items.filter((i) => i.purchaseDate && i.purchaseDate.substring(0, 4) < "2024");
+      } else {
+        items = items.filter((i) => i.purchaseDate && i.purchaseDate.substring(0, 4) === statsYear);
+      }
+    }
+    if (statsDimension === "subCategory") {
+      items = items.filter((i) => i.mainCategory === statsMainCategory);
+      if (statsSubCategory) items = items.filter((i) => i.subCategory === statsSubCategory);
+    }
+    return items;
+  }, [statsItems, statsYear, statsDimension, statsMainCategory, statsSubCategory]);
+
+  // 上述条目的照片列表 { url, itemName }，用于照片查看弹层
+  const statsPhotosList = useMemo(() => {
+    const list = [];
+    statsItemsFilteredByYear.forEach((item) => {
+      (item.imageUrls || []).forEach((url) => list.push({ url, itemName: item.name || "未命名" }));
+    });
+    return list;
+  }, [statsItemsFilteredByYear]);
 
   // Section 2e: Persist Clothes Items to Local Storage
   // Whenever `clothesItems` changes, save the updated array to localStorage.
@@ -1687,7 +1843,7 @@ function App() {
   // Adds a new clothing item with a unique ID, main category, subcategory, name, season, purchase date, price, frequency, color, and creation date to the state.
   // After adding, resets the form fields.
 
-  function addClothesItem() {
+  async function addClothesItem() {
     const name = cName.trim();
     if (!name) return;
 
@@ -1700,14 +1856,24 @@ function App() {
     if (duplicateItem) {
       const confirmMessage = `存在类似的物品：【${duplicateItem.name}】，请确认是否新增？`;
       if (!window.confirm(confirmMessage)) {
-        // 用户点击"否"，取消新增
         return;
       }
     }
 
     const selectedColor = colors.find((c) => c.name === cColor);
+    const itemId = crypto.randomUUID();
+    let imageUrls = [];
+    if (pendingImageFiles.length > 0 && session?.user?.id) {
+      try {
+        imageUrls = await uploadClothesImages(supabase, session.user.id, itemId, pendingImageFiles);
+      } catch (err) {
+        window.alert(err.message || "照片上传失败");
+        return;
+      }
+    }
+
     const item = {
-      id: crypto.randomUUID(),
+      id: itemId,
       name,
       mainCategory: cMainCategory,
       subCategory: cSubCategory,
@@ -1717,15 +1883,19 @@ function App() {
       frequency: mapFrequency(cFrequency),
       color: color,
       colorHex: selectedColor?.hex || "#CCCCCC",
+      occasionTags: Array.isArray(cOccasionTags) ? cOccasionTags : [],
+      wearingLayer: cWearingLayer && wearingLayerOptions.includes(cWearingLayer) ? cWearingLayer : "",
+      material: cMaterial && materialOptions.includes(cMaterial) ? cMaterial : "",
+      styleTags: Array.isArray(cStyleTags) ? cStyleTags : [],
+      fit: cFit && fitOptions.includes(cFit) ? cFit : "",
+      imageUrls,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     setClothesItems((prev) => [item, ...prev]);
-    
-    // 同步到云端
     syncItemToCloud(item, "clothes", "upsert");
-    
+
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤短袖");
@@ -1734,6 +1904,12 @@ function App() {
     setCPrice("");
     setCFrequency("偶尔");
     setCColor("黑色");
+    setCOccasionTags([]);
+    setCWearingLayer("");
+    setCMaterial("");
+    setCStyleTags([]);
+    setCFit("");
+    setPendingImageFiles([]);
     setSelectedItemId(null);
     setSelectedItemIds(new Set());
   }
@@ -1774,6 +1950,12 @@ function App() {
             frequency: mapFrequency(cFrequency),
             color: cColor,
             colorHex: selectedColor?.hex || item.colorHex || "#CCCCCC",
+            occasionTags: Array.isArray(cOccasionTags) ? cOccasionTags : [],
+            wearingLayer: cWearingLayer && wearingLayerOptions.includes(cWearingLayer) ? cWearingLayer : "",
+            material: cMaterial && materialOptions.includes(cMaterial) ? cMaterial : "",
+            styleTags: Array.isArray(cStyleTags) ? cStyleTags : [],
+            fit: cFit && fitOptions.includes(cFit) ? cFit : "",
+            imageUrls: item.imageUrls && Array.isArray(item.imageUrls) ? item.imageUrls : [],
             updatedAt: new Date().toISOString(),
           };
           return updatedItem;
@@ -1782,13 +1964,11 @@ function App() {
       })
     );
     
-    // 同步更新到云端
     if (updatedItem) {
       syncItemToCloud(updatedItem, "clothes", "upsert");
     }
     
     setEditingItemId(null);
-    // 保存完成后，清除选中状态
     if (selectedItemId === id) {
       setSelectedItemId(null);
     }
@@ -1800,6 +1980,75 @@ function App() {
     setCPrice("");
     setCFrequency("偶尔");
     setCColor("黑色");
+    setCOccasionTags([]);
+    setCWearingLayer("");
+    setCMaterial("");
+    setCStyleTags([]);
+    setCFit("");
+  }
+
+  // 为当前编辑的衣物添加照片（上传后追加 URL）
+  async function addPhotosToClothesItem(itemId, files) {
+    if (!session?.user?.id || !files?.length) return;
+    try {
+      const urls = await uploadClothesImages(supabase, session.user.id, itemId, Array.from(files));
+      setClothesItems((prev) =>
+        prev.map((item) =>
+          item.id === itemId
+            ? { ...item, imageUrls: [...(item.imageUrls || []), ...urls], updatedAt: new Date().toISOString() }
+            : item
+        )
+      );
+      const updated = clothesItems.find((i) => i.id === itemId);
+      if (updated) {
+        syncItemToCloud({ ...updated, imageUrls: [...(updated.imageUrls || []), ...urls] }, "clothes", "upsert");
+      }
+    } catch (err) {
+      window.alert(err.message || "照片上传失败");
+    }
+  }
+
+  function removePhotoFromClothesItem(itemId, url) {
+    setClothesItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId) return item;
+        const next = (item.imageUrls || []).filter((u) => u !== url);
+        return { ...item, imageUrls: next, updatedAt: new Date().toISOString() };
+      })
+    );
+    const updated = clothesItems.find((i) => i.id === itemId);
+    if (updated) {
+      const next = (updated.imageUrls || []).filter((u) => u !== url);
+      syncItemToCloud({ ...updated, imageUrls: next }, "clothes", "upsert");
+    }
+  }
+
+  function addUnlinkedBatchPhotosToItem(type, itemId, pendingIds) {
+    const urls = pendingUploads.filter((p) => pendingIds.includes(p.id) && p.url).map((p) => p.url);
+    if (!urls.length) return;
+    const isClothes = type === "clothes";
+    const items = isClothes ? clothesItems : daughterClothesItems;
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return;
+    const existing = item.imageUrls || [];
+    const nextUrls = [...existing];
+    urls.forEach((u) => {
+      if (!nextUrls.includes(u)) nextUrls.push(u);
+    });
+    const updated = { ...item, imageUrls: nextUrls, updatedAt: new Date().toISOString() };
+    if (isClothes) {
+      setClothesItems((prev) => prev.map((i) => (i.id === itemId ? updated : i)));
+    } else {
+      setDaughterClothesItems((prev) => prev.map((i) => (i.id === itemId ? updated : i)));
+    }
+    syncItemToCloud(updated, type, "upsert");
+    setPendingUploads((prev) =>
+      prev.map((p) =>
+        pendingIds.includes(p.id)
+          ? { ...p, status: "linked", target: { source: type, itemId, itemName: item.name || "未命名" } }
+          : p
+      )
+    );
   }
 
   // Section 2g-2: Start Edit Clothes Item Handler
@@ -1822,6 +2071,11 @@ function App() {
     setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
     setCFrequency(mapFrequency(item.frequency || "偶尔"));
     setCColor(item.color || "黑色");
+    setCOccasionTags(Array.isArray(item.occasionTags) ? item.occasionTags : []);
+    setCWearingLayer(item.wearingLayer && wearingLayerOptions.includes(item.wearingLayer) ? item.wearingLayer : "");
+    setCMaterial(item.material && materialOptions.includes(item.material) ? item.material : "");
+    setCStyleTags(Array.isArray(item.styleTags) ? item.styleTags : []);
+    setCFit(item.fit && fitOptions.includes(item.fit) ? item.fit : "");
   }
 
   // Section 2g-3: Cancel Edit Handler
@@ -1837,6 +2091,12 @@ function App() {
     setCPrice("");
     setCFrequency("偶尔");
     setCColor("黑色");
+    setCOccasionTags([]);
+    setCWearingLayer("");
+    setCMaterial("");
+    setCStyleTags([]);
+    setCFit("");
+    setPendingImageFiles([]);
     setSelectedItemId(null);
     setSelectedItemIds(new Set());
   }
@@ -1854,6 +2114,12 @@ function App() {
       setCPrice("");
       setCFrequency("偶尔");
       setCColor("黑色");
+      setCOccasionTags([]);
+      setCWearingLayer("");
+      setCMaterial("");
+      setCStyleTags([]);
+      setCFit("");
+      setPendingImageFiles([]);
       return;
     }
     const item = clothesItems.find((i) => i.id === selectedItemId);
@@ -1908,7 +2174,7 @@ function App() {
   // Adds a new clothing item for daughter with a unique ID, main category, subcategory, name, season, purchase date, price, frequency, color, and creation date to the state.
   // After adding, resets the form fields.
 
-  function addDaughterClothesItem() {
+  async function addDaughterClothesItem() {
     const name = cName.trim();
     if (!name) return;
 
@@ -1916,19 +2182,26 @@ function App() {
     const price = cPrice.trim() ? parseFloat(cPrice) || null : null;
     const color = cColor;
 
-    // 检查重复
     const duplicateItem = checkDuplicateItem(purchaseDate, price, color, daughterClothesItems);
     if (duplicateItem) {
       const confirmMessage = `存在类似的物品：【${duplicateItem.name}】，请确认是否新增？`;
-      if (!window.confirm(confirmMessage)) {
-        // 用户点击"否"，取消新增
+      if (!window.confirm(confirmMessage)) return;
+    }
+
+    const selectedColor = colors.find((c) => c.name === cColor);
+    const itemId = crypto.randomUUID();
+    let imageUrls = [];
+    if (pendingImageFiles.length > 0 && session?.user?.id) {
+      try {
+        imageUrls = await uploadClothesImages(supabase, session.user.id, itemId, pendingImageFiles);
+      } catch (err) {
+        window.alert(err.message || "照片上传失败");
         return;
       }
     }
 
-    const selectedColor = colors.find((c) => c.name === cColor);
     const item = {
-      id: crypto.randomUUID(),
+      id: itemId,
       name,
       mainCategory: cMainCategory,
       subCategory: cSubCategory,
@@ -1938,15 +2211,19 @@ function App() {
       frequency: mapFrequency(cFrequency),
       color: color,
       colorHex: selectedColor?.hex || "#CCCCCC",
+      occasionTags: Array.isArray(cOccasionTags) ? cOccasionTags : [],
+      wearingLayer: cWearingLayer && wearingLayerOptions.includes(cWearingLayer) ? cWearingLayer : "",
+      material: cMaterial && materialOptions.includes(cMaterial) ? cMaterial : "",
+      styleTags: Array.isArray(cStyleTags) ? cStyleTags : [],
+      fit: cFit && fitOptions.includes(cFit) ? cFit : "",
+      imageUrls,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     setDaughterClothesItems((prev) => [item, ...prev]);
-    
-    // 同步到云端
     syncItemToCloud(item, "daughter", "upsert");
-    
+
     setCName("");
     setCMainCategory("上衣");
     setCSubCategory("T恤短袖");
@@ -1955,6 +2232,12 @@ function App() {
     setCPrice("");
     setCFrequency("偶尔");
     setCColor("黑色");
+    setCOccasionTags([]);
+    setCWearingLayer("");
+    setCMaterial("");
+    setCStyleTags([]);
+    setCFit("");
+    setPendingImageFiles([]);
     setSelectedItemId(null);
     setSelectedItemIds(new Set());
   }
@@ -1995,6 +2278,12 @@ function App() {
             frequency: mapFrequency(cFrequency),
             color: cColor,
             colorHex: selectedColor?.hex || item.colorHex || "#CCCCCC",
+            occasionTags: Array.isArray(cOccasionTags) ? cOccasionTags : [],
+            wearingLayer: cWearingLayer && wearingLayerOptions.includes(cWearingLayer) ? cWearingLayer : "",
+            material: cMaterial && materialOptions.includes(cMaterial) ? cMaterial : "",
+            styleTags: Array.isArray(cStyleTags) ? cStyleTags : [],
+            fit: cFit && fitOptions.includes(cFit) ? cFit : "",
+            imageUrls: item.imageUrls && Array.isArray(item.imageUrls) ? item.imageUrls : [],
             updatedAt: new Date().toISOString(),
           };
           return updatedItem;
@@ -2003,13 +2292,11 @@ function App() {
       })
     );
     
-    // 同步更新到云端
     if (updatedItem) {
       syncItemToCloud(updatedItem, "daughter", "upsert");
     }
     
     setEditingItemId(null);
-    // 保存完成后，清除选中状态
     if (selectedItemId === id) {
       setSelectedItemId(null);
     }
@@ -2021,6 +2308,40 @@ function App() {
     setCPrice("");
     setCFrequency("偶尔");
     setCColor("黑色");
+    setCOccasionTags([]);
+    setCWearingLayer("");
+    setCMaterial("");
+    setCStyleTags([]);
+    setCFit("");
+  }
+
+  async function addPhotosToDaughterClothesItem(itemId, files) {
+    if (!session?.user?.id || !files?.length) return;
+    try {
+      const urls = await uploadClothesImages(supabase, session.user.id, itemId, Array.from(files));
+      setDaughterClothesItems((prev) =>
+        prev.map((item) =>
+          item.id === itemId
+            ? { ...item, imageUrls: [...(item.imageUrls || []), ...urls], updatedAt: new Date().toISOString() }
+            : item
+        )
+      );
+      const updated = daughterClothesItems.find((i) => i.id === itemId);
+      if (updated) {
+        syncItemToCloud({ ...updated, imageUrls: [...(updated.imageUrls || []), ...urls] }, "daughter", "upsert");
+      }
+    } catch (err) {
+      window.alert(err.message || "照片上传失败");
+    }
+  }
+
+  function removePhotoFromDaughterClothesItem(itemId, url) {
+    const item = daughterClothesItems.find((i) => i.id === itemId);
+    if (!item) return;
+    const nextUrls = (item.imageUrls || []).filter((u) => u !== url);
+    const updated = { ...item, imageUrls: nextUrls, updatedAt: new Date().toISOString() };
+    setDaughterClothesItems((prev) => prev.map((i) => (i.id === itemId ? updated : i)));
+    syncItemToCloud(updated, "daughter", "upsert");
   }
 
   // Section 2g-6: Start Edit Daughter Clothes Item Handler
@@ -2043,6 +2364,11 @@ function App() {
     setCPrice(item.price !== null && item.price !== undefined ? String(item.price) : "");
     setCFrequency(mapFrequency(item.frequency || "偶尔"));
     setCColor(item.color || "黑色");
+    setCOccasionTags(Array.isArray(item.occasionTags) ? item.occasionTags : []);
+    setCWearingLayer(item.wearingLayer && wearingLayerOptions.includes(item.wearingLayer) ? item.wearingLayer : "");
+    setCMaterial(item.material && materialOptions.includes(item.material) ? item.material : "");
+    setCStyleTags(Array.isArray(item.styleTags) ? item.styleTags : []);
+    setCFit(item.fit && fitOptions.includes(item.fit) ? item.fit : "");
   }
 
   // Section 2g-7: Set End Reason for Daughter Handler
@@ -2463,6 +2789,7 @@ function App() {
             setCategory("clothes");
             setSelectedItemId(null);
             setSelectedItemIds(new Set());
+            setShowBatchPhotoView(false);
           }}
           style={{
             padding: "10px 14px",
@@ -2483,6 +2810,7 @@ function App() {
             setCategory("daughterClothes");
             setSelectedItemId(null);
             setSelectedItemIds(new Set());
+            setShowBatchPhotoView(false);
           }}
           style={{
             padding: "10px 14px",
@@ -2503,6 +2831,7 @@ function App() {
             setCategory("stats");
             setSelectedItemId(null);
             setSelectedItemIds(new Set());
+            setShowBatchPhotoView(false);
           }}
           style={{
             padding: "10px 14px",
@@ -2518,6 +2847,25 @@ function App() {
           数据统计
         </button>
 
+        <button
+          onClick={() => {
+            setShowBatchPhotoView(true);
+            setCategory(null);
+          }}
+          style={{
+            padding: "10px 14px",
+            borderRadius: 8,
+            border: "1px solid #ccc",
+            background: showBatchPhotoView ? "#f0f7ff" : "white",
+            cursor: "pointer",
+            fontSize: "clamp(13px, 3.5vw, 15px)",
+            flex: "1",
+            minWidth: "100px"
+          }}
+        >
+          批量补照片
+        </button>
+
         {/* 护肤/化妆 栏目暂时隐藏，后续优化时再展示 */}
       </div>
 
@@ -2530,7 +2878,257 @@ function App() {
           boxSizing: "border-box"
         }}
       >
-        {category === "stats" ? (
+        {showBatchPhotoView ? (
+          /* 批量补照片视图 */
+          (() => {
+            const itemsForSource = (source) => (source === "clothes" ? clothesItems : daughterClothesItems).filter((i) => !i.endReason);
+            const linkPendingToItem = (pendingId, source, itemId) => {
+              const entry = pendingUploads.find((p) => p.id === pendingId);
+              if (!entry?.url || entry.status === "linked") return;
+              const items = source === "clothes" ? clothesItems : daughterClothesItems;
+              const item = items.find((i) => i.id === itemId);
+              if (!item) return;
+              const urls = item.imageUrls || [];
+              if (urls.includes(entry.url)) return;
+              const updated = { ...item, imageUrls: [...urls, entry.url], updatedAt: new Date().toISOString() };
+              if (source === "clothes") {
+                setClothesItems((prev) => prev.map((i) => (i.id === itemId ? updated : i)));
+              } else {
+                setDaughterClothesItems((prev) => prev.map((i) => (i.id === itemId ? updated : i)));
+              }
+              syncItemToCloud(updated, source, "upsert");
+              setPendingUploads((prev) =>
+                prev.map((p) =>
+                  p.id === pendingId
+                    ? { ...p, status: "linked", target: { source, itemId, itemName: item.name || "未命名" } }
+                    : p
+                )
+              );
+            };
+            const unlinkPending = (pendingId) => {
+              const entry = pendingUploads.find((p) => p.id === pendingId);
+              if (!entry?.target) return;
+              const { source, itemId } = entry.target;
+              const items = source === "clothes" ? clothesItems : daughterClothesItems;
+              const item = items.find((i) => i.id === itemId);
+              if (!item) return;
+              const nextUrls = (item.imageUrls || []).filter((u) => u !== entry.url);
+              const updated = { ...item, imageUrls: nextUrls, updatedAt: new Date().toISOString() };
+              if (source === "clothes") {
+                setClothesItems((prev) => prev.map((i) => (i.id === itemId ? updated : i)));
+              } else {
+                setDaughterClothesItems((prev) => prev.map((i) => (i.id === itemId ? updated : i)));
+              }
+              syncItemToCloud(updated, source, "upsert");
+              setPendingUploads((prev) =>
+                prev.map((p) => (p.id === pendingId ? { ...p, status: "uploaded", target: null } : p))
+              );
+            };
+            const retryUpload = async (pendingId) => {
+              const entry = pendingUploads.find((p) => p.id === pendingId);
+              if (!entry?.file || !session?.user) return;
+              setPendingUploads((prev) => prev.map((p) => (p.id === pendingId ? { ...p, errorMessage: undefined } : p)));
+              try {
+                const url = await uploadClothesImageUnlinked(supabase, session.user.id, entry.file);
+                setPendingUploads((prev) =>
+                  prev.map((p) => (p.id === pendingId ? { ...p, url, status: "uploaded", errorMessage: undefined } : p))
+                );
+              } catch (err) {
+                setPendingUploads((prev) =>
+                  prev.map((p) => (p.id === pendingId ? { ...p, status: "error", errorMessage: err?.message || "上传失败" } : p))
+                );
+              }
+            };
+            return (
+              <div style={{ padding: "16px 0" }}>
+                <h2 style={{ marginTop: 0, marginBottom: 16 }}>批量补照片</h2>
+                <p style={{ fontSize: 14, color: "#666", marginBottom: 16 }}>先选择多张图片上传，再逐张关联到已有衣物。</p>
+
+                {!session?.user ? (
+                  <p style={{ color: "#c00" }}>请先登录后再使用批量补照片。</p>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+                      <input
+                        ref={batchPhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const input = e.target;
+                          const fileList = input?.files;
+                          const MAX_SELECT = 50;
+                          const raw = fileList && fileList.length > 0 ? Array.from(fileList) : [];
+                          const newFiles = raw.slice(0, MAX_SELECT);
+                          if (newFiles.length > 0) {
+                            setSelectedBatchFiles((prev) => [...prev, ...newFiles]);
+                          }
+                          requestAnimationFrame(() => {
+                            if (input) input.value = "";
+                          });
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => batchPhotoInputRef.current?.click()}
+                        style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 14 }}
+                      >
+                        选择图片
+                      </button>
+                      {selectedBatchFiles.length > 0 && (
+                        <>
+                          <span style={{ fontSize: 13, color: "#666" }}>已选 {selectedBatchFiles.length} 张</span>
+                          <button
+                            type="button"
+                            disabled={batchUploading}
+                            onClick={async () => {
+                              setBatchUploading(true);
+                              const next = [...pendingUploads];
+                              const newSelections = { ...batchLinkSelections };
+                              for (let i = 0; i < selectedBatchFiles.length; i++) {
+                                const file = selectedBatchFiles[i];
+                                const id = `batch-${Date.now()}-${i}`;
+                                newSelections[id] = { source: "clothes", itemId: "" };
+                                try {
+                                  const url = await uploadClothesImageUnlinked(supabase, session.user.id, file);
+                                  next.push({ id, url, filename: file.name, status: "uploaded", target: null, file });
+                                } catch (err) {
+                                  next.push({ id, url: null, filename: file.name, status: "error", target: null, file, errorMessage: err?.message || "上传失败" });
+                                }
+                              }
+                              setBatchLinkSelections(newSelections);
+                              setPendingUploads(next);
+                              setSelectedBatchFiles([]);
+                              setBatchUploading(false);
+                            }}
+                            style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #28a745", background: "#28a745", color: "#fff", cursor: batchUploading ? "not-allowed" : "pointer", fontSize: 14 }}
+                          >
+                            {batchUploading ? "上传中…" : "开始上传"}
+                          </button>
+                        </>
+                      )}
+                      <span style={{ fontSize: 13, color: "#666" }}>选好后点击「开始上传」，再在下方关联到衣物。可暂不关联，之后在编辑衣物时也可从「已上传未关联的照片」中选择添加。</span>
+                    </div>
+
+                    {pendingUploads.length === 0 ? (
+                      <p style={{ fontSize: 14, color: "#888" }}>暂无待关联照片，请先选择图片上传。</p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {pendingUploads.map((entry) => (
+                          <div
+                            key={entry.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 12,
+                              padding: 12,
+                              border: "1px solid #eee",
+                              borderRadius: 8,
+                              background: entry.status === "error" ? "#fff5f5" : entry.status === "linked" ? "#f0fff4" : "#fff",
+                            }}
+                          >
+                            <div style={{ flexShrink: 0 }}>
+                              {entry.status === "error" ? (
+                                <div style={{ width: 64, height: 64, background: "#eee", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#999" }}>失败</div>
+                              ) : entry.url ? (
+                                <ClothesPhoto supabase={supabase} url={entry.url} style={{ width: 64, height: 64 }} />
+                              ) : (
+                                <div style={{ width: 64, height: 64, background: "#eee", borderRadius: 8 }} />
+                              )}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, color: "#333", marginBottom: 4 }}>{entry.filename}</div>
+                              {entry.status === "error" && (
+                                <div style={{ fontSize: 12, color: "#c00", marginBottom: 4 }}>{entry.errorMessage}</div>
+                              )}
+                              {entry.status === "linked" ? (
+                                <div style={{ fontSize: 13, color: "#28a745" }}>已关联到 {entry.target?.itemName}</div>
+                              ) : (
+                                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                  <select
+                                    value={(batchLinkSelections[entry.id]?.source) || "clothes"}
+                                    onChange={(e) => {
+                                      const source = e.target.value;
+                                      setBatchLinkSelections((prev) => ({ ...prev, [entry.id]: { ...(prev[entry.id] || {}), source, itemId: "", searchQuery: "" } }));
+                                    }}
+                                    style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ccc", fontSize: 13 }}
+                                  >
+                                    <option value="clothes">我的衣物</option>
+                                    <option value="daughter">女儿衣物</option>
+                                  </select>
+                                  {(() => {
+                                    const src = (batchLinkSelections[entry.id]?.source) || "clothes";
+                                    const searchQuery = (batchLinkSelections[entry.id]?.searchQuery) || "";
+                                    const filteredItems = itemsForSource(src).filter((it) => {
+                                      const q = searchQuery.trim().toLowerCase();
+                                      if (!q) return true;
+                                      const name = (it.name || "").toLowerCase();
+                                      const main = (it.mainCategory || "").toLowerCase();
+                                      const sub = (it.subCategory || "").toLowerCase();
+                                      return name.includes(q) || main.includes(q) || sub.includes(q);
+                                    });
+                                    return (
+                                      <>
+                                        <input
+                                          type="text"
+                                          placeholder="搜索名称"
+                                          value={searchQuery}
+                                          onChange={(e) => setBatchLinkSelections((prev) => ({ ...prev, [entry.id]: { ...(prev[entry.id] || {}), source: prev[entry.id]?.source || "clothes", itemId: prev[entry.id]?.itemId || "", searchQuery: e.target.value } }))}
+                                          style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc", fontSize: 13, width: 100 }}
+                                        />
+                                        <select
+                                          value={filteredItems.some((it) => it.id === (batchLinkSelections[entry.id]?.itemId)) ? (batchLinkSelections[entry.id]?.itemId) : ""}
+                                          onChange={(e) => setBatchLinkSelections((prev) => ({ ...prev, [entry.id]: { ...(prev[entry.id] || {}), source: prev[entry.id]?.source || "clothes", itemId: e.target.value, searchQuery: prev[entry.id]?.searchQuery } }))}
+                                          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ccc", fontSize: 13, minWidth: 140 }}
+                                        >
+                                          <option value="">选择衣物</option>
+                                          {filteredItems.map((it) => (
+                                            <option key={it.id} value={it.id}>{it.name || "未命名"}（{it.mainCategory || ""}/{it.subCategory || ""}）</option>
+                                          ))}
+                                        </select>
+                                      </>
+                                    );
+                                  })()}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const sel = batchLinkSelections[entry.id];
+                                      const source = sel?.source || "clothes";
+                                      const itemId = sel?.itemId;
+                                      if (!itemId) return;
+                                      linkPendingToItem(entry.id, source, itemId);
+                                    }}
+                                    disabled={entry.status !== "uploaded" || !entry.url || !(batchLinkSelections[entry.id]?.itemId)}
+                                    style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #28a745", background: "#28a745", color: "#fff", cursor: "pointer", fontSize: 13 }}
+                                  >
+                                    关联
+                                  </button>
+                                  {entry.status === "error" && entry.file && (
+                                    <button type="button" onClick={() => retryUpload(entry.id)} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 13 }}>重试</button>
+                                  )}
+                                </div>
+                              )}
+                              {entry.status === "linked" && (
+                                <button
+                                  type="button"
+                                  onClick={() => unlinkPending(entry.id)}
+                                  style={{ marginTop: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 12 }}
+                                >
+                                  取消关联
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()
+        ) : category === "stats" ? (
           <div className="stats-section" style={{ padding: "16px 0" }}>
             <h2 style={{ marginTop: 0, marginBottom: 16 }}>数据统计</h2>
 
@@ -2593,6 +3191,32 @@ function App() {
               {statsYear && (
                 <span style={{ fontSize: 13, color: "#0066cc" }}>
                   已筛选：{statsYear === "before2024" ? "2024年以前" : `${statsYear}年`}
+                </span>
+              )}
+            </div>
+
+            {/* 场合筛选（放在年份和维度之间） */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>场合：</span>
+              <select
+                value={statsOccasion}
+                onChange={(e) => setStatsOccasion(e.target.value)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  background: "#fff",
+                }}
+              >
+                <option value="">全部场合</option>
+                {occasionOptions.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              {statsOccasion && (
+                <span style={{ fontSize: 13, color: "#0066cc" }}>
+                  已筛选：{statsOccasion}
                 </span>
               )}
             </div>
@@ -2666,13 +3290,13 @@ function App() {
               </button>
             </div>
 
-            {/* 小类维度时：选择主分类 */}
+            {/* 小类维度时：选择主分类、选择小类 */}
             {statsDimension === "subCategory" && (
               <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={{ fontSize: 14, color: "#666", marginRight: 4 }}>选择主分类：</span>
                 <select
                   value={statsMainCategory}
-                  onChange={(e) => setStatsMainCategory(e.target.value)}
+                  onChange={(e) => { setStatsMainCategory(e.target.value); setStatsSubCategory(""); }}
                   style={{
                     padding: "8px 12px",
                     borderRadius: 8,
@@ -2683,6 +3307,24 @@ function App() {
                 >
                   {mainCategories.map((cat) => (
                     <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: 14, color: "#666", marginRight: 4, marginLeft: 8 }}>选择小类：</span>
+                <select
+                  value={statsSubCategory}
+                  onChange={(e) => setStatsSubCategory(e.target.value)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #ccc",
+                    fontSize: 14,
+                    background: "#fff",
+                    minWidth: 120,
+                  }}
+                >
+                  <option value="">全部小类</option>
+                  {statsSubCategoryOptions.map((sub) => (
+                    <option key={sub} value={sub}>{sub}</option>
                   ))}
                 </select>
               </div>
@@ -2715,6 +3357,94 @@ function App() {
                 </div>
               );
             })()}
+
+            {/* 照片查看入口：符合当前筛选条件的所有衣物照片 */}
+            <div style={{ marginBottom: 20 }}>
+              <button
+                type="button"
+                onClick={() => setShowStatsPhotos(true)}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  color: "#0066cc",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                📷 查看符合筛选条件的衣物照片
+                {statsPhotosList.length > 0 && (
+                  <span style={{ fontSize: 12, color: "#888" }}>（共 {statsPhotosList.length} 张）</span>
+                )}
+              </button>
+            </div>
+
+            {/* 照片查看弹层 */}
+            {showStatsPhotos && (
+              <div
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  zIndex: 100,
+                  background: "rgba(0,0,0,0.5)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                  padding: 24,
+                  overflow: "auto",
+                }}
+                onClick={(e) => e.target === e.currentTarget && setShowStatsPhotos(false)}
+              >
+                <div
+                  style={{
+                    background: "#fff",
+                    borderRadius: 12,
+                    padding: 20,
+                    maxWidth: 900,
+                    width: "100%",
+                    maxHeight: "90vh",
+                    overflow: "auto",
+                    boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>符合筛选条件的衣物照片</h3>
+                    <button
+                      type="button"
+                      onClick={() => setShowStatsPhotos(false)}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #ccc",
+                        background: "#fff",
+                        cursor: "pointer",
+                        fontSize: 14,
+                      }}
+                    >
+                      关闭
+                    </button>
+                  </div>
+                  {statsPhotosList.length === 0 ? (
+                    <p style={{ color: "#666", fontSize: 14 }}>当前筛选条件下暂无照片。</p>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 12 }}>
+                      {statsPhotosList.map((entry, idx) => (
+                        <div key={`${entry.url}-${idx}`} style={{ textAlign: "center" }}>
+                          <ClothesPhoto supabase={supabase} url={entry.url} style={{ width: 100, height: 100, margin: "0 auto" }} />
+                          <div style={{ fontSize: 12, color: "#666", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={entry.itemName}>{entry.itemName}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 按所选维度展示 */}
             {statsYear ? (
@@ -2955,6 +3685,24 @@ function App() {
                 ))}
               </select>
               <select
+                value={filterOccasion}
+                onChange={(e) => setFilterOccasion(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  marginRight: 8,
+                }}
+              >
+                <option value="">全部场合</option>
+                {occasionOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              <select
                 value={filterMainCategory}
                 onChange={(e) => {
                   setFilterMainCategory(e.target.value);
@@ -3011,11 +3759,12 @@ function App() {
                 }}
               />
 
-              {(filterYear || filterSeason || filterMainCategory || filterSubCategory || searchQuery.trim()) && (
+              {(filterYear || filterSeason || filterOccasion || filterMainCategory || filterSubCategory || searchQuery.trim()) && (
                 <button
                   onClick={() => {
                     setFilterYear("");
                     setFilterSeason("");
+                    setFilterOccasion("");
                     setFilterMainCategory("");
                     setFilterSubCategory("");
                     setSearchQuery("");
@@ -3236,6 +3985,130 @@ function App() {
                 ))}
               </select>
 
+              <span style={{ fontSize: 13, color: "#666", marginRight: 4 }}>场合：</span>
+              {occasionOptions.map((opt) => (
+                <label key={opt} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8, cursor: "pointer", fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={cOccasionTags.includes(opt)}
+                    onChange={() => {
+                      if (cOccasionTags.includes(opt)) setCOccasionTags(cOccasionTags.filter((t) => t !== opt));
+                      else setCOccasionTags([...cOccasionTags, opt]);
+                    }}
+                  />
+                  {opt}
+                </label>
+              ))}
+
+              <select
+                value={cWearingLayer}
+                onChange={(e) => setCWearingLayer(e.target.value)}
+                title="穿着层级"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  marginLeft: 8,
+                }}
+              >
+                <option value="">穿着层级（可选）</option>
+                {wearingLayerOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={cMaterial}
+                onChange={(e) => setCMaterial(e.target.value)}
+                title="材质"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  marginLeft: 8,
+                }}
+              >
+                <option value="">材质（可选）</option>
+                {materialOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+
+              <span style={{ fontSize: 13, color: "#666", marginRight: 4, marginLeft: 8 }}>风格：</span>
+              {styleTagOptions.map((opt) => (
+                <label key={opt} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8, cursor: "pointer", fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={cStyleTags.includes(opt)}
+                    onChange={() => {
+                      if (cStyleTags.includes(opt)) setCStyleTags(cStyleTags.filter((t) => t !== opt));
+                      else setCStyleTags([...cStyleTags, opt]);
+                    }}
+                  />
+                  {opt}
+                </label>
+              ))}
+
+              <select
+                value={cFit}
+                onChange={(e) => setCFit(e.target.value)}
+                title="版型"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  marginLeft: 8,
+                }}
+              >
+                <option value="">版型（可选）</option>
+                {fitOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+
+              {(() => {
+                const editingClothesItem = editingItemId ? clothesItems.find((i) => i.id === editingItemId) : null;
+                const hasPhotos = (editingClothesItem?.imageUrls?.length ?? 0) > 0;
+                if (editingItemId && hasPhotos) return null;
+                return (
+                  <div style={{ width: "100%", marginTop: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, color: "#666", marginRight: 8 }}>衣物照片</span>
+                    <span style={{ fontSize: 12, color: "#999" }}>建议补充照片，方便识别</span>
+                    {editingItemId ? (
+                      <>
+                        <label style={{ display: "inline-flex", alignItems: "center", marginTop: 4, cursor: "pointer", fontSize: 13 }}>
+                          <input type="file" ref={photoInputRef} accept="image/*" multiple hidden onChange={(e) => { const f = e.target.files; if (f?.length) addPhotosToClothesItem(editingItemId, f); e.target.value = ""; }} />
+                          <span style={{ padding: "4px 8px", border: "1px solid #ccc", borderRadius: 8 }}>添加照片</span>
+                        </label>
+                        {unlinkedBatchPhotos.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => { setShowUnlinkedPhotoPicker({ type: "clothes", itemId: editingItemId }); setUnlinkedPickerSelectedIds(new Set()); }}
+                            style={{ marginLeft: 8, padding: "4px 8px", border: "1px solid #28a745", borderRadius: 8, background: "#fff", color: "#28a745", cursor: "pointer", fontSize: 13 }}
+                          >
+                            从已上传未关联的照片中选择
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {pendingImageFiles.length > 0 && <span style={{ fontSize: 13, color: "#666", marginRight: 8 }}>已选 {pendingImageFiles.length} 张</span>}
+                        <label style={{ display: "inline-flex", cursor: "pointer", fontSize: 13 }}>
+                          <input type="file" ref={photoInputRef} accept="image/*" multiple hidden onChange={(e) => { const f = e.target.files; if (f?.length) setPendingImageFiles((prev) => [...prev, ...Array.from(f)]); e.target.value = ""; }} />
+                          <span style={{ padding: "4px 8px", border: "1px solid #ccc", borderRadius: 8 }}>选择照片</span>
+                        </label>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+
               <button
                 onClick={editingItemId ? () => updateClothesItem(editingItemId) : addClothesItem}
                 style={{
@@ -3285,7 +4158,7 @@ function App() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                      gridTemplateColumns: "56px minmax(120px, 1fr) repeat(8, minmax(90px, 1fr))",
                       gap: 8,
                       padding: "8px 12px",
                       backgroundColor: "#f5f5f5",
@@ -3296,10 +4169,13 @@ function App() {
                       border: "1px solid #e0e0e0",
                     }}
                   >
+                    <div style={{ display: "flex", alignItems: "center" }}>图片</div>
+                    <div style={{ display: "flex", alignItems: "center" }}>描述</div>
                     <div onClick={() => { const next = sortField === "purchaseDate" && sortDirection === "asc" ? "desc" : "asc"; setSortField("purchaseDate"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>购入时间{sortField === "purchaseDate" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "purchaseDuration" && sortDirection === "asc" ? "desc" : "asc"; setSortField("purchaseDuration"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>购入时长{sortField === "purchaseDuration" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "price" && sortDirection === "asc" ? "desc" : "asc"; setSortField("price"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>价格{sortField === "price" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "season" && sortDirection === "asc" ? "desc" : "asc"; setSortField("season"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>季节{sortField === "season" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div style={{ display: "flex", alignItems: "center" }}>场合</div>
                     <div onClick={() => { const next = sortField === "frequency" && sortDirection === "asc" ? "desc" : "asc"; setSortField("frequency"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>穿着频度{sortField === "frequency" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "color" && sortDirection === "asc" ? "desc" : "asc"; setSortField("color"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>颜色{sortField === "color" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "updatedAt" && sortDirection === "asc" ? "desc" : "asc"; setSortField("updatedAt"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>更新{sortField === "updatedAt" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
@@ -3339,55 +4215,26 @@ function App() {
                           transition: "all 0.2s ease",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 12,
-                            marginBottom: 8,
-                            alignItems: "center",
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            {it.colorHex && (
-                              <div
-                                style={{
-                                  width: 24,
-                                  height: 24,
-                                  borderRadius: 4,
-                                  backgroundColor: it.colorHex,
-                                  border: it.colorHex === "#FFFFFF" ? "1px solid #ddd" : "none",
-                                  flexShrink: 0,
-                                }}
-                                title={it.color || ""}
-                              />
-                            )}
-                            {(it.subCategory || it.type) && (
-                              <div
-                                style={{
-                                  fontSize: 20,
-                                  lineHeight: 1,
-                                  flexShrink: 0,
-                                }}
-                                title={it.subCategory || it.type || ""}
-                              >
-                                {getSubCategoryIcon(it.subCategory || it.type)}
-                              </div>
-                            )}
-                            <div style={{ fontWeight: 700 }}>{it.name}</div>
-                          </div>
-                        </div>
                         {/* 数据行 - 表格形式 */}
                         <div
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                            gridTemplateColumns: "56px minmax(120px, 1fr) repeat(8, minmax(90px, 1fr))",
                             gap: 8,
                             color: "#666",
                             fontSize: 14,
                             padding: "4px 0",
+                            alignItems: "center",
                           }}
                         >
+                          <div>
+                            <ClothesPhoto
+                              supabase={supabase}
+                              url={it.imageUrls && it.imageUrls[0]}
+                              style={{ width: 40, height: 40, flexShrink: 0 }}
+                            />
+                          </div>
+                          <div style={{ fontWeight: 600 }}>{it.name || "-"}</div>
                           <div>
                             {it.purchaseDate ? (() => {
                               try {
@@ -3416,6 +4263,7 @@ function App() {
                               : "-"}
                           </div>
                           <div>{it.season ? mapSeason(it.season) : "-"}</div>
+                          <div>{it.occasionTags?.length ? it.occasionTags.join("、") : "-"}</div>
                           <div style={{ color: (() => { const freq = it.frequency ? mapFrequency(it.frequency) : ""; if (freq === "偶尔" || freq === "从未") return "#dc3545"; if (freq === "经常" || freq === "每天") return "#28a745"; return "#666"; })() }}>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
                           <div>{it.color || "-"}</div>
                           <div>{it.updatedAt ? (() => { try { const d = new Date(it.updatedAt); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; } catch { return it.updatedAt; } })() : "-"}</div>
@@ -3669,6 +4517,24 @@ function App() {
                 ))}
               </select>
               <select
+                value={filterOccasion}
+                onChange={(e) => setFilterOccasion(e.target.value)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  fontSize: 14,
+                  marginRight: 8,
+                }}
+              >
+                <option value="">全部场合</option>
+                {occasionOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              <select
                 value={filterMainCategory}
                 onChange={(e) => {
                   setFilterMainCategory(e.target.value);
@@ -3725,11 +4591,12 @@ function App() {
                 }}
               />
 
-              {(filterYear || filterSeason || filterMainCategory || filterSubCategory || searchQuery.trim()) && (
+              {(filterYear || filterSeason || filterOccasion || filterMainCategory || filterSubCategory || searchQuery.trim()) && (
                 <button
                   onClick={() => {
                     setFilterYear("");
                     setFilterSeason("");
+                    setFilterOccasion("");
                     setFilterMainCategory("");
                     setFilterSubCategory("");
                     setSearchQuery("");
@@ -3950,6 +4817,130 @@ function App() {
                 ))}
               </select>
 
+              <span style={{ fontSize: 13, color: "#666", marginRight: 4 }}>场合：</span>
+              {occasionOptions.map((opt) => (
+                <label key={opt} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8, cursor: "pointer", fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={cOccasionTags.includes(opt)}
+                    onChange={() => {
+                      if (cOccasionTags.includes(opt)) setCOccasionTags(cOccasionTags.filter((t) => t !== opt));
+                      else setCOccasionTags([...cOccasionTags, opt]);
+                    }}
+                  />
+                  {opt}
+                </label>
+              ))}
+
+              <select
+                value={cWearingLayer}
+                onChange={(e) => setCWearingLayer(e.target.value)}
+                title="穿着层级"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  marginLeft: 8,
+                }}
+              >
+                <option value="">穿着层级（可选）</option>
+                {wearingLayerOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={cMaterial}
+                onChange={(e) => setCMaterial(e.target.value)}
+                title="材质"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  marginLeft: 8,
+                }}
+              >
+                <option value="">材质（可选）</option>
+                {materialOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+
+              <span style={{ fontSize: 13, color: "#666", marginRight: 4, marginLeft: 8 }}>风格：</span>
+              {styleTagOptions.map((opt) => (
+                <label key={opt} style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8, cursor: "pointer", fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={cStyleTags.includes(opt)}
+                    onChange={() => {
+                      if (cStyleTags.includes(opt)) setCStyleTags(cStyleTags.filter((t) => t !== opt));
+                      else setCStyleTags([...cStyleTags, opt]);
+                    }}
+                  />
+                  {opt}
+                </label>
+              ))}
+
+              <select
+                value={cFit}
+                onChange={(e) => setCFit(e.target.value)}
+                title="版型"
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  marginLeft: 8,
+                }}
+              >
+                <option value="">版型（可选）</option>
+                {fitOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+
+              {(() => {
+                const editingDaughterItem = editingItemId ? daughterClothesItems.find((i) => i.id === editingItemId) : null;
+                const hasPhotos = (editingDaughterItem?.imageUrls?.length ?? 0) > 0;
+                if (editingItemId && hasPhotos) return null;
+                return (
+                  <div style={{ width: "100%", marginTop: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, color: "#666", marginRight: 8 }}>衣物照片</span>
+                    <span style={{ fontSize: 12, color: "#999" }}>建议补充照片，方便识别</span>
+                    {editingItemId ? (
+                      <>
+                        <label style={{ display: "inline-flex", alignItems: "center", marginTop: 4, cursor: "pointer", fontSize: 13 }}>
+                          <input type="file" ref={photoInputRefDaughter} accept="image/*" multiple hidden onChange={(e) => { const f = e.target.files; if (f?.length) addPhotosToDaughterClothesItem(editingItemId, f); e.target.value = ""; }} />
+                          <span style={{ padding: "4px 8px", border: "1px solid #ccc", borderRadius: 8 }}>添加照片</span>
+                        </label>
+                        {unlinkedBatchPhotos.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => { setShowUnlinkedPhotoPicker({ type: "daughter", itemId: editingItemId }); setUnlinkedPickerSelectedIds(new Set()); }}
+                            style={{ marginLeft: 8, padding: "4px 8px", border: "1px solid #28a745", borderRadius: 8, background: "#fff", color: "#28a745", cursor: "pointer", fontSize: 13 }}
+                          >
+                            从已上传未关联的照片中选择
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {pendingImageFiles.length > 0 && <span style={{ fontSize: 13, color: "#666", marginRight: 8 }}>已选 {pendingImageFiles.length} 张</span>}
+                        <label style={{ display: "inline-flex", cursor: "pointer", fontSize: 13 }}>
+                          <input type="file" ref={photoInputRefDaughter} accept="image/*" multiple hidden onChange={(e) => { const f = e.target.files; if (f?.length) setPendingImageFiles((prev) => [...prev, ...Array.from(f)]); e.target.value = ""; }} />
+                          <span style={{ padding: "4px 8px", border: "1px solid #ccc", borderRadius: 8 }}>选择照片</span>
+                        </label>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+
               <button
                 onClick={editingItemId ? () => updateDaughterClothesItem(editingItemId) : addDaughterClothesItem}
                 style={{
@@ -3999,7 +4990,7 @@ function App() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                      gridTemplateColumns: "56px minmax(120px, 1fr) repeat(8, minmax(90px, 1fr))",
                       gap: 8,
                       padding: "8px 12px",
                       backgroundColor: "#f5f5f5",
@@ -4010,10 +5001,13 @@ function App() {
                       border: "1px solid #e0e0e0",
                     }}
                   >
+                    <div style={{ display: "flex", alignItems: "center" }}>图片</div>
+                    <div style={{ display: "flex", alignItems: "center" }}>描述</div>
                     <div onClick={() => { const next = sortField === "purchaseDate" && sortDirection === "asc" ? "desc" : "asc"; setSortField("purchaseDate"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>购入时间{sortField === "purchaseDate" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "purchaseDuration" && sortDirection === "asc" ? "desc" : "asc"; setSortField("purchaseDuration"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>购入时长{sortField === "purchaseDuration" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "price" && sortDirection === "asc" ? "desc" : "asc"; setSortField("price"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>价格{sortField === "price" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "season" && sortDirection === "asc" ? "desc" : "asc"; setSortField("season"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>季节{sortField === "season" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
+                    <div style={{ display: "flex", alignItems: "center" }}>场合</div>
                     <div onClick={() => { const next = sortField === "frequency" && sortDirection === "asc" ? "desc" : "asc"; setSortField("frequency"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>穿着频度{sortField === "frequency" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "color" && sortDirection === "asc" ? "desc" : "asc"; setSortField("color"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>颜色{sortField === "color" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
                     <div onClick={() => { const next = sortField === "updatedAt" && sortDirection === "asc" ? "desc" : "asc"; setSortField("updatedAt"); setSortDirection(next); }} style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 4 }}>更新{sortField === "updatedAt" && (sortDirection === "asc" ? " ↑" : " ↓")}</div>
@@ -4053,55 +5047,26 @@ function App() {
                           transition: "all 0.2s ease",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 12,
-                            marginBottom: 8,
-                            alignItems: "center",
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            {it.colorHex && (
-                              <div
-                                style={{
-                                  width: 24,
-                                  height: 24,
-                                  borderRadius: 4,
-                                  backgroundColor: it.colorHex,
-                                  border: it.colorHex === "#FFFFFF" ? "1px solid #ddd" : "none",
-                                  flexShrink: 0,
-                                }}
-                                title={it.color || ""}
-                              />
-                            )}
-                            {(it.subCategory || it.type) && (
-                              <div
-                                style={{
-                                  fontSize: 20,
-                                  lineHeight: 1,
-                                  flexShrink: 0,
-                                }}
-                                title={it.subCategory || it.type || ""}
-                              >
-                                {getSubCategoryIcon(it.subCategory || it.type)}
-                              </div>
-                            )}
-                            <div style={{ fontWeight: 700 }}>{it.name}</div>
-                          </div>
-                        </div>
                         {/* 数据行 - 表格形式 */}
                         <div
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+                            gridTemplateColumns: "56px minmax(120px, 1fr) repeat(8, minmax(90px, 1fr))",
                             gap: 8,
                             color: "#666",
                             fontSize: 14,
                             padding: "4px 0",
+                            alignItems: "center",
                           }}
                         >
+                          <div>
+                            <ClothesPhoto
+                              supabase={supabase}
+                              url={it.imageUrls && it.imageUrls[0]}
+                              style={{ width: 40, height: 40, flexShrink: 0 }}
+                            />
+                          </div>
+                          <div style={{ fontWeight: 600 }}>{it.name || "-"}</div>
                           <div>
                             {it.purchaseDate ? (() => {
                               try {
@@ -4130,6 +5095,7 @@ function App() {
                               : "-"}
                           </div>
                           <div>{it.season ? mapSeason(it.season) : "-"}</div>
+                          <div>{it.occasionTags?.length ? it.occasionTags.join("、") : "-"}</div>
                           <div style={{ color: (() => { const freq = it.frequency ? mapFrequency(it.frequency) : ""; if (freq === "偶尔" || freq === "从未") return "#dc3545"; if (freq === "经常" || freq === "每天") return "#28a745"; return "#666"; })() }}>{it.frequency ? mapFrequency(it.frequency) : "-"}</div>
                           <div>{it.color || "-"}</div>
                           <div>{it.updatedAt ? (() => { try { const d = new Date(it.updatedAt); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; } catch { return it.updatedAt; } })() : "-"}</div>
@@ -4393,6 +5359,97 @@ function App() {
             >
               取消
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 从已上传未关联的照片中选择（编辑衣物时添加） */}
+      {showUnlinkedPhotoPicker && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 16,
+          }}
+          onClick={() => { setShowUnlinkedPhotoPicker(null); setUnlinkedPickerSelectedIds(new Set()); }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 20,
+              maxWidth: 420,
+              width: "100%",
+              maxHeight: "85vh",
+              overflow: "auto",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 12px 0", fontSize: 16 }}>从已上传未关联的照片中选择</h3>
+            <p style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>勾选要添加到当前衣物的照片，点击确定添加。</p>
+            {unlinkedBatchPhotos.length === 0 ? (
+              <p style={{ fontSize: 14, color: "#888" }}>当前没有未关联的照片，请先在「批量补照片」中上传。</p>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: 8, marginBottom: 16 }}>
+                {unlinkedBatchPhotos.map((p) => (
+                  <label
+                    key={p.id}
+                    style={{
+                      display: "block",
+                      cursor: "pointer",
+                      border: unlinkedPickerSelectedIds.has(p.id) ? "2px solid #28a745" : "1px solid #eee",
+                      borderRadius: 8,
+                      overflow: "hidden",
+                      padding: 2,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={unlinkedPickerSelectedIds.has(p.id)}
+                      onChange={(e) => {
+                        setUnlinkedPickerSelectedIds((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(p.id);
+                          else next.delete(p.id);
+                          return next;
+                        });
+                      }}
+                      style={{ display: "none" }}
+                    />
+                    <ClothesPhoto supabase={supabase} url={p.url} style={{ width: "100%", aspectRatio: "1", display: "block" }} />
+                  </label>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => { setShowUnlinkedPhotoPicker(null); setUnlinkedPickerSelectedIds(new Set()); }}
+                style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: 14 }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={unlinkedPickerSelectedIds.size === 0}
+                onClick={() => {
+                  if (showUnlinkedPhotoPicker && unlinkedPickerSelectedIds.size > 0) {
+                    addUnlinkedBatchPhotosToItem(showUnlinkedPhotoPicker.type, showUnlinkedPhotoPicker.itemId, Array.from(unlinkedPickerSelectedIds));
+                    setShowUnlinkedPhotoPicker(null);
+                    setUnlinkedPickerSelectedIds(new Set());
+                  }
+                }}
+                style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #28a745", background: "#28a745", color: "#fff", cursor: unlinkedPickerSelectedIds.size === 0 ? "not-allowed" : "pointer", fontSize: 14 }}
+              >
+                确定添加
+              </button>
+            </div>
           </div>
         </div>
       )}

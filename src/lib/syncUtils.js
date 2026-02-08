@@ -122,6 +122,36 @@ export function localToDbItem(localItem, userId) {
     }
   }
   
+  // 适用场合：多选，空数组或未设置时存为 null（不限制场合）
+  const occasionTags = Array.isArray(localItem.occasionTags) && localItem.occasionTags.length > 0
+    ? localItem.occasionTags
+    : null;
+
+  // 穿着层级：单选，空字符串或未设置时存为 null（不限制）
+  const wearingLayer = localItem.wearingLayer && String(localItem.wearingLayer).trim()
+    ? String(localItem.wearingLayer).trim()
+    : null;
+
+  // 材质：单选，空字符串或未设置时存为 null（不限制）
+  const material = localItem.material && String(localItem.material).trim()
+    ? String(localItem.material).trim()
+    : null;
+
+  // 风格：多选，空数组或未设置时存为 null（不限制）
+  const styleTags = Array.isArray(localItem.styleTags) && localItem.styleTags.length > 0
+    ? localItem.styleTags
+    : null;
+
+  // 版型：单选，空字符串或未设置时存为 null（不限制）
+  const fit = localItem.fit && String(localItem.fit).trim()
+    ? String(localItem.fit).trim()
+    : null;
+
+  // 衣物照片：URL 数组，空或未设置时存为 null
+  const imageUrls = Array.isArray(localItem.imageUrls) && localItem.imageUrls.length > 0
+    ? localItem.imageUrls.filter((u) => u && String(u).trim())
+    : null;
+
   return {
     id: localItem.id,
     user_id: userId,
@@ -138,6 +168,12 @@ export function localToDbItem(localItem, userId) {
     updated_at: new Date().toISOString(),
     end_reason: localItem.endReason || null,
     end_date: endDate,
+    occasion_tags: occasionTags,
+    wearing_layer: wearingLayer,
+    material,
+    style_tags: styleTags,
+    fit,
+    image_urls: imageUrls,
   };
 }
 
@@ -247,6 +283,36 @@ export function dbToLocalItem(dbItem) {
     });
   }
   
+  // 适用场合：多选，空或未设置时为空数组（不限制场合）
+  const occasionTags = dbItem.occasion_tags && Array.isArray(dbItem.occasion_tags)
+    ? dbItem.occasion_tags
+    : [];
+
+  // 穿着层级：单选，空或未设置时为空字符串（不限制）
+  const wearingLayer = dbItem.wearing_layer && String(dbItem.wearing_layer).trim()
+    ? String(dbItem.wearing_layer).trim()
+    : '';
+
+  // 材质：单选，空或未设置时为空字符串（不限制）
+  const material = dbItem.material && String(dbItem.material).trim()
+    ? String(dbItem.material).trim()
+    : '';
+
+  // 风格：多选，空或未设置时为空数组（不限制）
+  const styleTags = dbItem.style_tags && Array.isArray(dbItem.style_tags)
+    ? dbItem.style_tags
+    : [];
+
+  // 版型：单选，空或未设置时为空字符串（不限制）
+  const fit = dbItem.fit && String(dbItem.fit).trim()
+    ? String(dbItem.fit).trim()
+    : '';
+
+  // 衣物照片：URL 数组，空或未设置时为空数组
+  const imageUrls = dbItem.image_urls && Array.isArray(dbItem.image_urls)
+    ? dbItem.image_urls.filter((u) => u && String(u).trim())
+    : [];
+
   return {
     id: dbItem.id,
     name: dbItem.name,
@@ -265,6 +331,12 @@ export function dbToLocalItem(dbItem) {
     updatedAt: dbItem.updated_at || new Date().toISOString(),
     endReason: dbItem.end_reason || null,
     endDate: dbItem.end_date || null,
+    occasionTags,
+    wearingLayer,
+    material,
+    styleTags,
+    fit,
+    imageUrls,
   };
 }
 
